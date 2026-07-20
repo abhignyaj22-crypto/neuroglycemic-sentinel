@@ -137,11 +137,15 @@ def load_aligned_window_frame(
 
     feature_columns, _ = discover_feature_columns(frame, modalities)
     all_features = sorted({item for values in feature_columns.values() for item in values})
-    forbidden_cgm = [name for name in all_features if "cgm" in name.lower()]
-    if forbidden_cgm:
+    forbidden_glucose_inputs = [
+        name
+        for name in all_features
+        if any(token in name.lower() for token in ("cgm", "glucose", "dexcom"))
+    ]
+    if forbidden_glucose_inputs:
         raise ValueError(
-            "input_cgm=false forbids CGM predictor columns; found: "
-            f"{forbidden_cgm}"
+            "input_cgm=false forbids glucose/CGM predictor columns; found: "
+            f"{forbidden_glucose_inputs}"
         )
     for column in all_features:
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
@@ -439,7 +443,7 @@ def predict_neural_batches(
     hypoglycemia_threshold_mg_dl: float = 70.0,
     hyperglycemia_threshold_mg_dl: float = 180.0,
 ) -> pd.DataFrame:
-    from .neural_training import inverse_transform_neuroglycemic_outputs
+    from .training import inverse_transform_neuroglycemic_outputs
 
     model.eval()
     device = next(model.parameters()).device

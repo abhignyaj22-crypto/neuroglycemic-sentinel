@@ -2,7 +2,7 @@
     "schema_version": "neural-glucose-training-v1",
     "prediction_target": "future_cgm_glucose_mg_dl",
     "forecast_horizons_minutes": [30, 60],
-    "active_modalities": ["eeg", "wearable", "ehr"],
+    "active_modalities": ["wearable"],
     "target_standardization": "train_only_zscore_per_horizon",
     "seed": 42,
     "epochs": 100,
@@ -38,6 +38,6 @@
     "early_stopping_patience": 12,
     "minimum_delta": 0.0001,
     "device": "cpu",
-    "checkpoint_relative_path": "outputs/models/neural_glucose_best.pt"
+    "checkpoint_relative_path": "outputs/models/physiocgm_wearable_best.pt"
   }
   

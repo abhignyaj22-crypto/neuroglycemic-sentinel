@@ -544,7 +544,9 @@ def run_neural_train(
 
     config = load_neural_training_config(config_path)
     frame, feature_names = load_aligned_window_frame(
-        data_path, config.forecast_horizons_minutes
+        data_path,
+        config.forecast_horizons_minutes,
+        modalities=config.active_modalities,
     )
     print_frame("ALIGNED SAME-PATIENT NEURAL GLUCOSE WINDOWS", frame)
     print(
@@ -680,6 +682,8 @@ def run_neural_train(
         "data_sha256": source_digest,
         "data_file_name": data_path.name,
         "alignment_contract": "same_patient_same_cohort_same_anchor",
+        "active_modalities": list(config.active_modalities),
+        "fusion_calibrated": len(config.active_modalities) > 1,
     }
     print(
         "\nTRAIN NEURAL MIXTURE-OF-EXPERTS: "
@@ -798,8 +802,14 @@ def run_neural_evaluate(
     )
     feature_standardizer = TrainOnlyFeatureStandardizer.from_dict(feature_schema)
     frame, discovered = load_aligned_window_frame(
-        data_path, config.forecast_horizons_minutes
+        data_path,
+        config.forecast_horizons_minutes,
+        modalities=model.modalities,
     )
+    if tuple(config.active_modalities) != tuple(model.modalities):
+        raise ValueError(
+            "Evaluation active_modalities differ from the trained checkpoint."
+        )
     if {name: tuple(values) for name, values in discovered.items()} != dict(
         feature_standardizer.feature_names
     ):
@@ -862,9 +872,12 @@ def cli() -> None:
             "ehr-glucose",
             "architecture",
             "lsl-audit",
+            "prepare-neural-data",
+            "validate-neural-data",
             "train-neural",
             "evaluate-neural",
             "neural-case",
+            "run-neural-e2e",
         ),
         default="eeg-wearable",
         help="Study to execute. The default preserves the original EEG/wearable run.",
@@ -910,6 +923,39 @@ def cli() -> None:
         help="Pre-aligned same-patient CSV/Parquet required by neural commands.",
     )
     parser.add_argument(
+        "--source",
+        choices=("physiocgm",),
+        default="physiocgm",
+        help="Real dataset adapter used by neural data preparation.",
+    )
+    parser.add_argument(
+        "--input-dir",
+        "--raw-dir",
+        dest="input_dir",
+        type=Path,
+        default=None,
+        help="PhysioCGM processed root containing subject/*.pkl clips.",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Prepared aligned CSV/Parquet destination.",
+    )
+    parser.add_argument(
+        "--source-timezone",
+        default="UTC",
+        help="Timezone assigned only to naive source timestamps before UTC conversion.",
+    )
+    parser.add_argument(
+        "--horizon-tolerance-minutes", type=float, default=5.0
+    )
+    parser.add_argument(
+        "--trust-pickle",
+        action="store_true",
+        help="Allow executable pickle input after verifying official PhysioCGM provenance.",
+    )
+    parser.add_argument(
         "--request",
         type=Path,
         default=None,
@@ -945,6 +991,79 @@ def cli() -> None:
         else:
             audit, _ = audit_xdf(arguments.xdf)
             print_frame("LABRECORDER XDF STREAM AUDIT", audit)
+        return
+
+    if arguments.study in {
+        "prepare-neural-data",
+        "validate-neural-data",
+        "run-neural-e2e",
+    }:
+        from src.neuroglycemic.neural_dataset import load_aligned_window_frame
+        from src.neuroglycemic.physiocgm_data import (
+            build_physiocgm_aligned_windows,
+            write_physiocgm_build,
+        )
+        from src.neuroglycemic.training import load_neural_training_config
+
+        neural_config_path = (
+            arguments.config
+            or PROJECT_ROOT / "config" / "neural_glucose_physio.json"
+        )
+        neural_config = load_neural_training_config(neural_config_path)
+        prepared_path = (
+            arguments.output
+            or arguments.data
+            or PROJECT_ROOT / "data" / "processed" / "physiocgm_aligned_windows.parquet"
+        )
+        if arguments.study in {"prepare-neural-data", "run-neural-e2e"}:
+            if arguments.input_dir is None:
+                parser.error(f"{arguments.study} requires --input-dir/--raw-dir.")
+            if arguments.source != "physiocgm":
+                parser.error("Only the physiocgm builder is currently implemented.")
+            prepared = build_physiocgm_aligned_windows(
+                arguments.input_dir,
+                horizons_minutes=neural_config.forecast_horizons_minutes,
+                horizon_tolerance_minutes=arguments.horizon_tolerance_minutes,
+                source_timezone=arguments.source_timezone,
+                trust_pickle=arguments.trust_pickle,
+            )
+            write_physiocgm_build(
+                prepared,
+                prepared_path,
+                input_dir=arguments.input_dir,
+                horizons_minutes=neural_config.forecast_horizons_minutes,
+                source_timezone=arguments.source_timezone,
+            )
+            print_frame("PREPARED PHYSIOCGM CAUSAL WINDOWS", prepared.frame)
+            print_frame("PHYSIOCGM ALIGNMENT AUDIT", prepared.audit)
+            print(f"\nSaved prepared neural data to: {prepared_path}")
+        validated, feature_names = load_aligned_window_frame(
+            prepared_path,
+            neural_config.forecast_horizons_minutes,
+            modalities=neural_config.active_modalities,
+            horizon_tolerance_minutes=arguments.horizon_tolerance_minutes,
+        )
+        print_frame("VALIDATED NEURAL DATASET", validated)
+        print("\nACTIVE MODALITY FEATURE CONTRACT")
+        print(json.dumps({key: list(value) for key, value in feature_names.items()}, indent=2))
+        if arguments.study == "run-neural-e2e":
+            neural_outputs = _neural_output_dir(arguments.output_dir)
+            trained = run_neural_train(
+                data_path=prepared_path,
+                config_path=neural_config_path,
+                checkpoint_path=arguments.checkpoint,
+                output_dir=neural_outputs,
+                batch_size=arguments.batch_size,
+                train_fraction=arguments.train_fraction,
+                validation_fraction=arguments.validation_fraction,
+            )
+            run_neural_evaluate(
+                data_path=prepared_path,
+                config_path=neural_config_path,
+                checkpoint_path=Path(str(trained["checkpoint"])),
+                output_dir=neural_outputs,
+                batch_size=arguments.batch_size,
+            )
         return
 
     if arguments.study in {"train-neural", "evaluate-neural"}:

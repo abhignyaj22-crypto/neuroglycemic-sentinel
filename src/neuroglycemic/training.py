@@ -22,6 +22,7 @@ class NeuralTrainingConfig:
     schema_version: str
     prediction_target: str
     forecast_horizons_minutes: tuple[int, ...]
+    active_modalities: tuple[str, ...]
     target_standardization: str
     seed: int
     epochs: int
@@ -222,6 +223,12 @@ def load_neural_training_config(path: Path) -> NeuralTrainingConfig:
         forecast_horizons_minutes=tuple(
             int(value) for value in values["forecast_horizons_minutes"]
         ),
+        active_modalities=tuple(
+            str(value)
+            for value in values.get(
+                "active_modalities", ("eeg", "wearable", "ehr")
+            )
+        ),
         target_standardization=str(values["target_standardization"]),
         seed=int(values["seed"]),
         epochs=int(values["epochs"]),
@@ -258,6 +265,20 @@ def _validate_config(config: NeuralTrainingConfig) -> None:
         raise ValueError("Forecast horizons must be positive minutes.")
     if len(set(config.forecast_horizons_minutes)) != len(config.forecast_horizons_minutes):
         raise ValueError("Forecast horizons must be unique.")
+    supported_modalities = ("eeg", "wearable", "ehr")
+    if not config.active_modalities:
+        raise ValueError("active_modalities must contain at least one modality.")
+    if len(set(config.active_modalities)) != len(config.active_modalities):
+        raise ValueError("active_modalities must be unique.")
+    if any(value not in supported_modalities for value in config.active_modalities):
+        raise ValueError(
+            "active_modalities must be an ordered subset of eeg, wearable, ehr."
+        )
+    expected_order = tuple(
+        value for value in supported_modalities if value in config.active_modalities
+    )
+    if config.active_modalities != expected_order:
+        raise ValueError("active_modalities must use eeg, wearable, ehr order.")
     if config.target_standardization != "train_only_zscore_per_horizon":
         raise ValueError(
             "target_standardization must be 'train_only_zscore_per_horizon'."
