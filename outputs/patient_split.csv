@@ -1,0 +1,11 @@
+patient_id,split
+cogwear_01,test
+cogwear_09,test
+cogwear_00,train
+cogwear_02,train
+cogwear_04,train
+cogwear_06,train
+cogwear_07,train
+cogwear_08,train
+cogwear_05,validation
+cogwear_10,validation

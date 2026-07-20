@@ -1,0 +1,29 @@
+{
+  "patient_id": "cogwear_01",
+  "condition": "baseline",
+  "prediction_target": "cognitive_load_during_this_recorded_session",
+  "alpha_eeg": 0.5,
+  "beta_wearable": 0.1684910938552075,
+  "combined_probability": 0.21313213795208172,
+  "fusion_weights": {
+    "eeg": 0.1346601652909332,
+    "wearable": 0.8653398347090667
+  },
+  "eeg_linear_contributions": {
+    "eeg_delta_mean": -0.0,
+    "eeg_theta_mean": -0.0,
+    "eeg_alpha_mean": 0.0,
+    "eeg_beta_mean": -0.0
+  },
+  "wearable_linear_contributions": {
+    "wearable_pulse_interval_rmssd_ms": -1.1730942571133292,
+    "wearable_bvp_variability": -0.5635639552750027,
+    "wearable_pulse_rate_bpm": -0.3682862228715059,
+    "wearable_eda_mean": 0.3604020113284951
+  },
+  "limitations": [
+    "Research output, not a diagnosis or clinical recommendation.",
+    "CogWear labels rest versus Stroop cognitive load; they are not stress, anxiety, depression, or diabetes labels.",
+    "The paired pilot analysis has only 10 complete participants, so uncertainty is high."
+  ]
+}

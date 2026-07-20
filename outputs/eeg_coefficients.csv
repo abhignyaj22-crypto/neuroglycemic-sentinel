@@ -1,0 +1,13 @@
+feature,standardized_coefficient,absolute_coefficient
+eeg_delta_mean,0.0,0.0
+eeg_theta_mean,0.0,0.0
+eeg_alpha_mean,0.0,0.0
+eeg_beta_mean,0.0,0.0
+eeg_gamma_mean,0.0,0.0
+eeg_delta_variability,0.0,0.0
+eeg_theta_variability,0.0,0.0
+eeg_alpha_variability,0.0,0.0
+eeg_beta_variability,0.0,0.0
+eeg_gamma_variability,0.0,0.0
+eeg_theta_alpha_ratio,0.0,0.0
+eeg_beta_alpha_ratio,0.0,0.0
