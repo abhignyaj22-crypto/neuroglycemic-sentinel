@@ -64,9 +64,25 @@ def print_raw_inspection(sessions: pd.DataFrame) -> None:
         "TBD: step count, blood pressure, SpO2, glucose, diagnoses, medications, and EHR fields."
     )
 
+def _json_safe(value: object) -> object:
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating, float)):
+        return float(value) if np.isfinite(value) else None
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    return value
+
+
 def _save_json(path: Path, values: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(values, indent=2), encoding="utf-8")
+    path.write_text(
+        json.dumps(_json_safe(values), indent=2, allow_nan=False), encoding="utf-8"
+    )
 
 
 def _metrics_for_column(frame: pd.DataFrame, probability_column: str) -> dict[str, dict[str, float]]:
@@ -426,12 +442,430 @@ def main(
     return {"metrics": metrics, "acceptance_checks": acceptance}
 
 
+def _neural_output_dir(value: Path | None) -> Path:
+    return value or PROJECT_ROOT / "outputs" / "neural_glucose"
+
+
+def _load_neural_case_request(path: Path):
+    from src.neuroglycemic.service import NeuralGlucoseForecastRequest
+
+    values = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(values, dict):
+        raise ValueError("Neural case request JSON must contain an object.")
+    required = {
+        "patient_id",
+        "anchor_time",
+        "horizon_minutes",
+        "feature_schema_version",
+        "features",
+        "availability",
+        "quality",
+        "staleness_minutes",
+    }
+    missing = required - set(values)
+    if missing:
+        raise ValueError(f"Neural case request is missing fields: {sorted(missing)}")
+    unknown = set(values) - required
+    if unknown:
+        raise ValueError(f"Neural case request has unknown fields: {sorted(unknown)}")
+    return NeuralGlucoseForecastRequest(**values)
+
+
+def _load_checkpoint_payload(path: Path) -> dict[str, object]:
+    import torch
+
+    try:
+        payload = torch.load(path, map_location="cpu", weights_only=True)
+    except TypeError:
+        payload = torch.load(path, map_location="cpu")
+    if not isinstance(payload, dict):
+        raise ValueError("Neural checkpoint payload must be a dictionary.")
+    return payload
+
+
+def _neural_model_from_spec(spec: dict[str, object]):
+    from src.neuroglycemic.neural_model import NeuroGlycemicNet
+
+    required = {
+        "input_dims",
+        "horizons_minutes",
+        "hidden_dim",
+        "embedding_dim",
+        "dropout",
+        "min_scale",
+    }
+    missing = required - set(spec)
+    if missing:
+        raise ValueError(f"Checkpoint model_spec is missing: {sorted(missing)}")
+    return NeuroGlycemicNet(
+        {str(name): int(value) for name, value in dict(spec["input_dims"]).items()},
+        horizons_minutes=tuple(int(value) for value in spec["horizons_minutes"]),
+        hidden_dim=int(spec["hidden_dim"]),
+        embedding_dim=int(spec["embedding_dim"]),
+        dropout=float(spec["dropout"]),
+        min_scale=float(spec["min_scale"]),
+    )
+
+
+def run_neural_train(
+    *,
+    data_path: Path,
+    config_path: Path,
+    checkpoint_path: Path | None,
+    output_dir: Path,
+    batch_size: int,
+    train_fraction: float,
+    validation_fraction: float,
+) -> dict[str, object]:
+    """Fit the neural model on one real, pre-aligned patient-level table."""
+
+    import torch
+
+    from src.neuroglycemic.neural_dataset import (
+        TrainOnlyFeatureStandardizer,
+        data_sha256,
+        glucose_forecast_metrics,
+        load_aligned_window_frame,
+        make_neural_batches,
+        modality_ablation_predictions,
+        modality_ablation_table,
+        patient_grouped_split,
+        predict_neural_batches,
+        target_column,
+    )
+    from src.neuroglycemic.neural_model import NeuroGlycemicNet
+    from src.neuroglycemic.training import (
+        GlucoseTargetStandardizer,
+        load_neural_training_config,
+        make_neuroglycemic_loss_step,
+        train_with_early_stopping,
+    )
+    from src.neuroglycemic.service import build_neural_checkpoint_metadata
+
+    config = load_neural_training_config(config_path)
+    frame, feature_names = load_aligned_window_frame(
+        data_path, config.forecast_horizons_minutes
+    )
+    print_frame("ALIGNED SAME-PATIENT NEURAL GLUCOSE WINDOWS", frame)
+    print(
+        "\nAlignment contract: each available EEG, wearable, and EHR record has "
+        "matching patient_id, cohort_id, and anchor_time provenance. No cross-cohort join is performed."
+    )
+    split_frame, split = patient_grouped_split(
+        frame,
+        seed=config.seed,
+        train_fraction=train_fraction,
+        validation_fraction=validation_fraction,
+    )
+    split_audit = (
+        split_frame.groupby("split", sort=False)
+        .agg(rows=("patient_id", "size"), patients=("patient_id", "nunique"))
+        .reset_index()
+    )
+    print_frame("PATIENT-GROUPED NEURAL TRAIN / VALIDATION / TEST SPLIT", split_audit)
+    print("\nPatient assignments:")
+    print(split.as_frame().to_string(index=False))
+
+    train = split_frame.loc[split_frame["split"] == "train"].copy()
+    validation = split_frame.loc[split_frame["split"] == "validation"].copy()
+    test = split_frame.loc[split_frame["split"] == "test"].copy()
+    feature_standardizer = TrainOnlyFeatureStandardizer.fit(train, feature_names)
+    target_values = torch.tensor(
+        train[
+            [target_column(value) for value in config.forecast_horizons_minutes]
+        ].to_numpy(float).tolist(),
+        dtype=torch.float32,
+    )
+    target_standardizer = GlucoseTargetStandardizer.fit(
+        target_values, config.forecast_horizons_minutes
+    )
+    print("\nTRAIN-ONLY FEATURE STANDARDIZATION")
+    print(json.dumps(feature_standardizer.as_dict(), indent=2))
+    print("\nTRAIN-ONLY TARGET STANDARDIZATION")
+    print(json.dumps(target_standardizer.as_dict(), indent=2))
+
+    train_batches = make_neural_batches(
+        train,
+        feature_standardizer,
+        config.forecast_horizons_minutes,
+        batch_size=batch_size,
+        shuffle=True,
+        seed=config.seed,
+    )
+    validation_batches = make_neural_batches(
+        validation,
+        feature_standardizer,
+        config.forecast_horizons_minutes,
+        batch_size=batch_size,
+    )
+    test_batches = make_neural_batches(
+        test,
+        feature_standardizer,
+        config.forecast_horizons_minutes,
+        batch_size=batch_size,
+    )
+    hidden_dim = int(config.model["hidden_dim"])
+    embedding_dim = int(config.model["embedding_dim"])
+    dropout = float(config.model["dropout"])
+    # Targets are standardized, so the configured 0.05 default is a small
+    # numerical floor rather than an irreducible one-standard-deviation floor.
+    min_scale = float(config.model["min_scale"])
+    torch.manual_seed(config.seed)
+    model = NeuroGlycemicNet(
+        feature_standardizer.input_dims,
+        horizons_minutes=config.forecast_horizons_minutes,
+        hidden_dim=hidden_dim,
+        embedding_dim=embedding_dim,
+        dropout=dropout,
+        min_scale=min_scale,
+    )
+    loss_step = make_neuroglycemic_loss_step(
+        config.expert_loss_weight, target_standardizer
+    )
+    destination = checkpoint_path or config.checkpoint_path
+    source_digest = data_sha256(data_path)
+    serving_metadata = build_neural_checkpoint_metadata(
+        model,
+        feature_names={
+            name: list(values)
+            for name, values in feature_standardizer.feature_names.items()
+        },
+        feature_means={
+            name: list(values) for name, values in feature_standardizer.means.items()
+        },
+        feature_scales={
+            name: list(values) for name, values in feature_standardizer.scales.items()
+        },
+        hidden_dim=hidden_dim,
+        embedding_dim=embedding_dim,
+        dropout=dropout,
+        min_scale=min_scale,
+    )
+    # The serving helper establishes the shared schema version and ordered
+    # feature contract.  Valid counts additionally let the research path audit
+    # exactly how many training observations supported every statistic.
+    serving_feature_schema = serving_metadata["feature_schema"]
+    serving_feature_schema.update(
+        {
+            "fit_split": feature_standardizer.fit_split,
+            "ordered_feature_names": {
+                name: list(values)
+                for name, values in feature_standardizer.feature_names.items()
+            },
+            "feature_names": {
+                name: list(values)
+                for name, values in feature_standardizer.feature_names.items()
+            },
+            "means": {
+                name: list(values)
+                for name, values in feature_standardizer.means.items()
+            },
+            "scales": {
+                name: list(values)
+                for name, values in feature_standardizer.scales.items()
+            },
+            "valid_counts": {
+                name: list(values)
+                for name, values in feature_standardizer.valid_counts.items()
+            },
+        }
+    )
+    checkpoint_metadata = {
+        **serving_metadata,
+        "patient_split": {
+            "train": list(split.train),
+            "validation": list(split.validation),
+            "test": list(split.test),
+        },
+        "data_sha256": source_digest,
+        "data_file_name": data_path.name,
+        "alignment_contract": "same_patient_same_cohort_same_anchor",
+    }
+    print(
+        "\nTRAIN NEURAL MIXTURE-OF-EXPERTS: "
+        f"parameters={sum(parameter.numel() for parameter in model.parameters())}, "
+        f"learning_rate={config.learning_rate:g}, epochs={config.epochs}, "
+        f"batch_size={batch_size}, horizons={config.forecast_horizons_minutes}"
+    )
+    result = train_with_early_stopping(
+        model,
+        train_batches,
+        validation_batches,
+        loss_step,
+        config,
+        target_standardizer=target_standardizer,
+        checkpoint_path=destination,
+        checkpoint_metadata=checkpoint_metadata,
+    )
+    history = pd.DataFrame(result.history)
+    print_frame("NEURAL TRAINING AND VALIDATION LOSSES", history)
+    print(history.to_string(index=False))
+    print(
+        f"\nSelected neural checkpoint: epoch={result.best_epoch}, "
+        f"validation_loss={result.best_validation_loss:.6f}, path={result.checkpoint_path}"
+    )
+    predictions = predict_neural_batches(
+        model,
+        test_batches,
+        target_standardizer,
+        config.forecast_horizons_minutes,
+        hypoglycemia_threshold_mg_dl=config.risk_thresholds_mg_dl[
+            "hypoglycemia"
+        ],
+        hyperglycemia_threshold_mg_dl=config.risk_thresholds_mg_dl[
+            "hyperglycemia"
+        ],
+    )
+    metrics = glucose_forecast_metrics(predictions)
+    ablation_scenarios = modality_ablation_predictions(
+        model,
+        test_batches,
+        target_standardizer,
+        config.forecast_horizons_minutes,
+        hypoglycemia_threshold_mg_dl=config.risk_thresholds_mg_dl[
+            "hypoglycemia"
+        ],
+        hyperglycemia_threshold_mg_dl=config.risk_thresholds_mg_dl[
+            "hyperglycemia"
+        ],
+    )
+    ablation = modality_ablation_table(ablation_scenarios)
+    print_frame("HELD-OUT PATIENT NEURAL GLUCOSE PREDICTIONS", predictions)
+    print("\nHELD-OUT NEURAL GLUCOSE METRICS")
+    print(json.dumps(_json_safe(metrics), indent=2, allow_nan=False))
+    print_frame("PAIRED HELD-OUT MISSING-MODALITY ABLATIONS", ablation)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    history.to_csv(output_dir / "training_losses.csv", index=False)
+    split.as_frame().to_csv(output_dir / "patient_split.csv", index=False)
+    predictions.to_csv(output_dir / "test_predictions.csv", index=False)
+    ablation.to_csv(output_dir / "missing_modality_ablation.csv", index=False)
+    _save_json(output_dir / "test_metrics.json", metrics)
+    _save_json(output_dir / "feature_schema.json", serving_feature_schema)
+    print(f"\nSaved neural study artifacts to: {output_dir}")
+    return {"metrics": metrics, "checkpoint": str(result.checkpoint_path)}
+
+
+def run_neural_evaluate(
+    *,
+    data_path: Path,
+    config_path: Path,
+    checkpoint_path: Path | None,
+    output_dir: Path,
+    batch_size: int,
+) -> dict[str, object]:
+    """Reproduce held-out evaluation using checkpoint-recorded splits and scalers."""
+
+    from src.neuroglycemic.neural_dataset import (
+        TrainOnlyFeatureStandardizer,
+        attach_recorded_split,
+        data_sha256,
+        glucose_forecast_metrics,
+        load_aligned_window_frame,
+        make_neural_batches,
+        modality_ablation_predictions,
+        modality_ablation_table,
+        predict_neural_batches,
+    )
+    from src.neuroglycemic.training import (
+        GlucoseTargetStandardizer,
+        load_neural_checkpoint,
+        load_neural_training_config,
+    )
+
+    config = load_neural_training_config(config_path)
+    destination = checkpoint_path or config.checkpoint_path
+    payload = _load_checkpoint_payload(destination)
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, dict):
+        raise ValueError("Checkpoint is missing neural dataset metadata.")
+    if data_sha256(data_path) != metadata.get("data_sha256"):
+        raise ValueError("Evaluation data SHA-256 does not match the training dataset.")
+    model_spec = metadata.get("model_spec")
+    feature_schema = metadata.get("feature_schema")
+    patient_split = metadata.get("patient_split")
+    if not isinstance(model_spec, dict) or not isinstance(feature_schema, dict) or not isinstance(patient_split, dict):
+        raise ValueError("Checkpoint is missing model, feature, or patient-split provenance.")
+    model = _neural_model_from_spec(model_spec)
+    load_neural_checkpoint(
+        destination,
+        model,
+        expected_prediction_target=config.prediction_target,
+        expected_horizons_minutes=config.forecast_horizons_minutes,
+    )
+    target_standardizer = GlucoseTargetStandardizer.from_dict(
+        payload["target_standardizer"]
+    )
+    feature_standardizer = TrainOnlyFeatureStandardizer.from_dict(feature_schema)
+    frame, discovered = load_aligned_window_frame(
+        data_path, config.forecast_horizons_minutes
+    )
+    if {name: tuple(values) for name, values in discovered.items()} != dict(
+        feature_standardizer.feature_names
+    ):
+        raise ValueError("Evaluation feature order/schema differs from the training checkpoint.")
+    frame = attach_recorded_split(frame, patient_split)
+    test = frame.loc[frame["split"] == "test"].copy()
+    print_frame("CHECKPOINT-MATCHED ALIGNED EVALUATION WINDOWS", test)
+    batches = make_neural_batches(
+        test,
+        feature_standardizer,
+        config.forecast_horizons_minutes,
+        batch_size=batch_size,
+    )
+    predictions = predict_neural_batches(
+        model,
+        batches,
+        target_standardizer,
+        config.forecast_horizons_minutes,
+        hypoglycemia_threshold_mg_dl=config.risk_thresholds_mg_dl[
+            "hypoglycemia"
+        ],
+        hyperglycemia_threshold_mg_dl=config.risk_thresholds_mg_dl[
+            "hyperglycemia"
+        ],
+    )
+    metrics = glucose_forecast_metrics(predictions)
+    ablation_scenarios = modality_ablation_predictions(
+        model,
+        batches,
+        target_standardizer,
+        config.forecast_horizons_minutes,
+        hypoglycemia_threshold_mg_dl=config.risk_thresholds_mg_dl[
+            "hypoglycemia"
+        ],
+        hyperglycemia_threshold_mg_dl=config.risk_thresholds_mg_dl[
+            "hyperglycemia"
+        ],
+    )
+    ablation = modality_ablation_table(ablation_scenarios)
+    print_frame("RELOADED HELD-OUT NEURAL PREDICTIONS", predictions)
+    print("\nRELOADED CHECKPOINT METRICS")
+    print(json.dumps(_json_safe(metrics), indent=2, allow_nan=False))
+    print_frame("RELOADED PAIRED MISSING-MODALITY ABLATIONS", ablation)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    predictions.to_csv(output_dir / "reloaded_test_predictions.csv", index=False)
+    ablation.to_csv(
+        output_dir / "reloaded_missing_modality_ablation.csv", index=False
+    )
+    _save_json(output_dir / "reloaded_test_metrics.json", metrics)
+    return {"metrics": metrics, "checkpoint": str(destination)}
+
+
 def cli() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "study",
         nargs="?",
-        choices=("eeg-wearable", "ehr-glucose", "architecture", "lsl-audit"),
+        choices=(
+            "eeg-wearable",
+            "ehr-glucose",
+            "architecture",
+            "lsl-audit",
+            "train-neural",
+            "evaluate-neural",
+            "neural-case",
+        ),
         default="eeg-wearable",
         help="Study to execute. The default preserves the original EEG/wearable run.",
     )
@@ -469,6 +903,33 @@ def cli() -> None:
         default=None,
         help="LabRecorder XDF file to inspect with the lsl-audit command.",
     )
+    parser.add_argument(
+        "--data",
+        type=Path,
+        default=None,
+        help="Pre-aligned same-patient CSV/Parquet required by neural commands.",
+    )
+    parser.add_argument(
+        "--request",
+        type=Path,
+        default=None,
+        help="JSON request for the checkpoint-backed neural-case command.",
+    )
+    parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        default=None,
+        help="Optional neural checkpoint path; otherwise the neural config is used.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Optional neural artifact directory.",
+    )
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--train-fraction", type=float, default=0.70)
+    parser.add_argument("--validation-fraction", type=float, default=0.15)
     arguments = parser.parse_args()
     if arguments.study == "eeg-wearable":
         config_path = arguments.config or PROJECT_ROOT / "config" / "study.json"
@@ -484,6 +945,67 @@ def cli() -> None:
         else:
             audit, _ = audit_xdf(arguments.xdf)
             print_frame("LABRECORDER XDF STREAM AUDIT", audit)
+        return
+
+    if arguments.study in {"train-neural", "evaluate-neural"}:
+        if arguments.data is None:
+            parser.error(f"{arguments.study} requires --data with a real aligned table.")
+        neural_config = arguments.config or PROJECT_ROOT / "config" / "neural_glucose.json"
+        neural_outputs = _neural_output_dir(arguments.output_dir)
+        if arguments.study == "train-neural":
+            run_neural_train(
+                data_path=arguments.data,
+                config_path=neural_config,
+                checkpoint_path=arguments.checkpoint,
+                output_dir=neural_outputs,
+                batch_size=arguments.batch_size,
+                train_fraction=arguments.train_fraction,
+                validation_fraction=arguments.validation_fraction,
+            )
+        else:
+            run_neural_evaluate(
+                data_path=arguments.data,
+                config_path=neural_config,
+                checkpoint_path=arguments.checkpoint,
+                output_dir=neural_outputs,
+                batch_size=arguments.batch_size,
+            )
+        return
+
+    if arguments.study == "neural-case":
+        if arguments.request is None:
+            parser.error("neural-case requires --request with a JSON request.")
+        neural_config_path = (
+            arguments.config or PROJECT_ROOT / "config" / "neural_glucose.json"
+        )
+        from src.neuroglycemic.architecture import run_neural_architecture_case
+        from src.neuroglycemic.health_agent import HealthAgent, build_openai_llm
+        from src.neuroglycemic.training import load_neural_training_config
+
+        neural_config = load_neural_training_config(neural_config_path)
+        checkpoint = arguments.checkpoint or neural_config.checkpoint_path
+        llm = None
+        if arguments.use_llm:
+            if not arguments.llm_model:
+                parser.error(
+                    "--use-llm requires --llm-model or HEALTHAGENT_LLM_MODEL."
+                )
+            llm = build_openai_llm(model=arguments.llm_model)
+        agent = HealthAgent(
+            llm=llm,
+            provider="openai" if llm is not None else None,
+            model_name=arguments.llm_model,
+        )
+        case = run_neural_architecture_case(
+            PROJECT_ROOT,
+            checkpoint_path=checkpoint,
+            request=_load_neural_case_request(arguments.request),
+            health_agent=agent,
+            include_raw_llm_response=arguments.print_llm_raw,
+            output_path=_neural_output_dir(arguments.output_dir) / "case_study.json",
+        )
+        print("\nCHECKPOINT-BACKED NEURAL ARCHITECTURE CASE STUDY")
+        print(json.dumps(case, indent=2))
         return
 
     from src.neuroglycemic.config import load_ehr_config

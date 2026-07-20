@@ -136,21 +136,19 @@
         }
       },
       "telemetry": {
-        "trace_id": "b6bdbd69-78e7-4edb-b46e-be33e49e1001",
+        "trace_id": "2aaf46be-18bd-4049-9aca-f575f74ded7e",
         "prompt_version": "healthagent-grounded-v1",
-        "llm_enabled": true,
-        "llm_called": true,
-        "provider": "openai",
+        "llm_enabled": false,
+        "llm_called": false,
+        "provider": null,
         "model": "langchain_openai",
-        "latency_ms": 1499.1524145007133,
+        "latency_ms": null,
         "request_id": null,
         "input_tokens": null,
         "output_tokens": null,
-        "validation_errors": [
-          "APIConnectionError: Connection error."
-        ],
-        "fallback_reason": "LLM response failed grounding/schema validation.",
-        "raw_response": ""
+        "validation_errors": [],
+        "fallback_reason": "LLM not configured; deterministic renderer used.",
+        "raw_response": null
       }
     }
   },
@@ -247,21 +245,19 @@
         }
       },
       "telemetry": {
-        "trace_id": "f72c7298-9ac4-442d-8fd0-cdce6b3c88bf",
+        "trace_id": "612b8e3f-535e-4c46-bc00-5e21fdfdfa95",
         "prompt_version": "healthagent-grounded-v1",
-        "llm_enabled": true,
-        "llm_called": true,
-        "provider": "openai",
+        "llm_enabled": false,
+        "llm_called": false,
+        "provider": null,
         "model": "langchain_openai",
-        "latency_ms": 1254.2822062969208,
+        "latency_ms": null,
         "request_id": null,
         "input_tokens": null,
         "output_tokens": null,
-        "validation_errors": [
-          "APIConnectionError: Connection error."
-        ],
-        "fallback_reason": "LLM response failed grounding/schema validation.",
-        "raw_response": ""
+        "validation_errors": [],
+        "fallback_reason": "LLM not configured; deterministic renderer used.",
+        "raw_response": null
       }
     }
   },
