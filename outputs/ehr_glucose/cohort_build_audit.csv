@@ -1,0 +1,9 @@
+measure,value
+selected_lab_rows,22161
+glucose_rows_after_quality_filter,2536
+forecast_anchors,641
+forecast_patients,69
+hyperglycemia_targets,129
+outside_admission,49
+insufficient_history,751
+no_target_in_horizon,1095

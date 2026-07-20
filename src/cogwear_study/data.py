@@ -13,6 +13,53 @@ REQUIRED_FILES = (
 )
 
 
+def discover_incomplete_sessions(config: StudyConfig) -> pd.DataFrame:
+    """Find real, unconfigured sessions with at least one missing modality.
+
+    These rows are inference-only case studies. They are deliberately excluded
+    from model fitting and from headline performance estimates.
+    """
+    rows: list[dict[str, object]] = []
+    configured = set(config.participants)
+    participant_dirs = sorted(
+        (path for path in config.raw_dir.iterdir() if path.is_dir() and path.name.isdigit()),
+        key=lambda path: int(path.name),
+    )
+    for participant_dir in participant_dirs:
+        participant = int(participant_dir.name)
+        if participant in configured:
+            continue
+        for condition, target in config.conditions.items():
+            session_dir = participant_dir / condition
+            paths = {name: session_dir / name for name in REQUIRED_FILES}
+            present = {name: path.exists() for name, path in paths.items()}
+            eeg_available = present["muse_eeg.csv"]
+            wearable_available = all(
+                present[name]
+                for name in ("empatica_bvp.csv", "empatica_eda.csv", "empatica_temp.csv")
+            )
+            if not any(present.values()) or (eeg_available and wearable_available):
+                continue
+            rows.append(
+                {
+                    "patient_id": f"cogwear_{participant:02d}",
+                    "participant_number": participant,
+                    "condition": condition,
+                    "target_cognitive_load": target,
+                    "eeg_path": paths["muse_eeg.csv"],
+                    "bvp_path": paths["empatica_bvp.csv"],
+                    "eda_path": paths["empatica_eda.csv"],
+                    "temp_path": paths["empatica_temp.csv"],
+                    "eeg_available": int(eeg_available),
+                    "wearable_available": int(wearable_available),
+                    "missing_files": ", ".join(
+                        name for name, is_present in present.items() if not is_present
+                    ),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 def build_session_index(config: StudyConfig) -> pd.DataFrame:
     """Create one row per patient, condition multimodal session."""
     rows: list[dict[str, object]] = []

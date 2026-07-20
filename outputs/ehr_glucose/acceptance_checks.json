@@ -1,0 +1,15 @@
+{
+  "patient_disjoint_split": true,
+  "feature_cutoff_flags_valid": true,
+  "future_target_flags_valid": true,
+  "training_selected_nonzero_epoch": true,
+  "validation_loss_improved": true,
+  "finite_test_predictions": true,
+  "ordered_prediction_intervals": true,
+  "probabilities_in_unit_interval": true,
+  "serialization_max_absolute_difference": 0.0,
+  "serialization_round_trip": true,
+  "case_study_not_abstained": true,
+  "clinical_performance_gate_passed": false,
+  "release_recommendation": "research_only_do_not_deploy"
+}

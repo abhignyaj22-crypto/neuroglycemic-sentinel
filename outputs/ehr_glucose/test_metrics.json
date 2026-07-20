@@ -1,0 +1,16 @@
+{
+  "rmse_mg_dl": 34.69419740048724,
+  "mae_mg_dl": 26.960286929700143,
+  "median_ae_mg_dl": 19.198458430911927,
+  "mard_percent": 22.08878417827387,
+  "r2": 0.5646009254710167,
+  "patient_macro_mae_mg_dl": 36.786062099746694,
+  "patient_macro_rmse_mg_dl": 40.38812501292125,
+  "interval_coverage": 0.9636363636363636,
+  "mean_interval_width_mg_dl": 163.0075930077492,
+  "brier_score": 0.29731105335636493,
+  "prevalence": 0.12727272727272726,
+  "auroc": 0.8296130952380953,
+  "average_precision": 0.47806015152849235,
+  "mase_vs_persistence": 1.287478675624961
+}

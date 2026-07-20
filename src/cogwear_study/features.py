@@ -242,3 +242,107 @@ def build_paired_feature_table(
     )
     audit = audit.merge(used, on=["patient_id", "condition"], how="left")
     return features, audit
+
+
+def build_real_missing_modality_cases(
+    sessions: pd.DataFrame, config: StudyConfig
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Extract inference-only windows from genuinely incomplete CogWear sessions."""
+    rows: list[dict[str, object]] = []
+    audits: list[dict[str, object]] = []
+    for session in sessions.itertuples(index=False):
+        eeg_available = bool(session.eeg_available)
+        wearable_available = bool(session.wearable_available)
+        frames: list[pd.DataFrame] = []
+        eeg = pd.DataFrame()
+        bvp = pd.DataFrame()
+        eda = pd.DataFrame()
+        temperature = pd.DataFrame()
+
+        if eeg_available:
+            eeg_columns = [
+                "time",
+                "HeadBandOn",
+                *[column for values in EEG_BANDS.values() for column in values],
+            ]
+            eeg = _numeric_frame(Path(session.eeg_path), eeg_columns)
+            eeg = eeg.loc[eeg["HeadBandOn"].fillna(0.0) > 0.0].reset_index(drop=True)
+            if eeg.empty:
+                eeg_available = False
+            else:
+                frames.append(eeg)
+        if wearable_available:
+            bvp = _numeric_frame(Path(session.bvp_path), ["time", "bvp"])
+            eda = _numeric_frame(Path(session.eda_path), ["time", "eda"])
+            temperature = _numeric_frame(Path(session.temp_path), ["time", "temp"])
+            if any(frame.empty for frame in (bvp, eda, temperature)):
+                wearable_available = False
+            else:
+                frames.extend((bvp, eda, temperature))
+
+        if not frames:
+            audits.append(
+                {
+                    "patient_id": session.patient_id,
+                    "condition": session.condition,
+                    "reason": "no complete modality bundle",
+                    "windows_kept": 0,
+                }
+            )
+            continue
+
+        overlap_start = max(float(frame["time"].min()) for frame in frames)
+        overlap_stop = min(float(frame["time"].max()) for frame in frames)
+        analysis_start = overlap_start + config.warmup_seconds
+        allowed_stop = min(
+            overlap_stop,
+            analysis_start + config.window_seconds * config.max_windows_per_condition,
+        )
+        possible_windows = max(
+            0, int(np.floor((allowed_stop - analysis_start + 1e-6) / config.window_seconds))
+        )
+        kept = 0
+        for window_index in range(possible_windows):
+            start = analysis_start + window_index * config.window_seconds
+            stop = start + config.window_seconds
+            eeg_window = _slice(eeg, start, stop) if eeg_available else pd.DataFrame()
+            bvp_window = _slice(bvp, start, stop) if wearable_available else pd.DataFrame()
+            eda_window = _slice(eda, start, stop) if wearable_available else pd.DataFrame()
+            temp_window = (
+                _slice(temperature, start, stop) if wearable_available else pd.DataFrame()
+            )
+            valid_eeg = eeg_available and len(eeg_window) >= 32
+            valid_wearable = wearable_available and (
+                len(bvp_window) >= 32 and len(eda_window) >= 4 and len(temp_window) >= 4
+            )
+            if not (valid_eeg or valid_wearable):
+                continue
+
+            row: dict[str, object] = {
+                "patient_id": session.patient_id,
+                "condition": session.condition,
+                "window_index": window_index,
+                "window_start_unix": start,
+                "target_cognitive_load": int(session.target_cognitive_load),
+                "eeg_available": int(valid_eeg),
+                "wearable_available": int(valid_wearable),
+                **{feature: float("nan") for feature in (*EEG_FEATURES, *WEARABLE_FEATURES)},
+            }
+            if valid_eeg:
+                row.update(_eeg_features(eeg_window))
+            if valid_wearable:
+                row.update(_wearable_features(bvp_window, eda_window, temp_window))
+            rows.append(row)
+            kept += 1
+
+        audits.append(
+            {
+                "patient_id": session.patient_id,
+                "condition": session.condition,
+                "reason": "real incomplete session; inference only",
+                "eeg_available": int(eeg_available),
+                "wearable_available": int(wearable_available),
+                "windows_kept": kept,
+            }
+        )
+    return pd.DataFrame(rows), pd.DataFrame(audits)

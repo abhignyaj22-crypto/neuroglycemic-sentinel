@@ -1,16 +1,29 @@
-
-#from __future__ import annotations
-
 import argparse
 import json
 from pathlib import Path
+import sys
 
 import numpy as np
 import pandas as pd
 
+PROJECT_ROOT = Path(__file__).resolve().parent
+SRC_ROOT = PROJECT_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
 from src.cogwear_study.config import load_config
-from src.cogwear_study.data import build_session_index, inspect_first_session, raw_file_sizes
-from src.cogwear_study.features import EEG_FEATURES, WEARABLE_FEATURES, build_paired_feature_table
+from src.cogwear_study.data import (
+    build_session_index,
+    discover_incomplete_sessions,
+    inspect_first_session,
+    raw_file_sizes,
+)
+from src.cogwear_study.features import (
+    EEG_FEATURES,
+    WEARABLE_FEATURES,
+    build_paired_feature_table,
+    build_real_missing_modality_cases,
+)
 from src.cogwear_study.fusion import fit_late_fusion, missing_modality_scenarios
 from src.cogwear_study.health_agent import build_explanation_payload, deterministic_health_agent
 from src.cogwear_study.model import (
@@ -21,7 +34,6 @@ from src.cogwear_study.model import (
 from src.cogwear_study.split import attach_split, split_patients
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent
 TARGET = "target_cognitive_load"
 
 
@@ -183,12 +195,26 @@ def main(config_path: Path | None = None, *, rebuild_features: bool = False) -> 
         f"\nTRAIN LATE FUSION: learning_rate={config.fusion_learning_rate}, "
         f"epochs={config.fusion_epochs}"
     )
+    eligible_modalities = np.array(
+        [eeg_head.best_epoch > 0, wearable_head.best_epoch > 0], dtype=bool
+    )
+    if not eligible_modalities.all():
+        excluded = [
+            name
+            for name, eligible in zip(("eeg", "wearable"), eligible_modalities, strict=True)
+            if not eligible
+        ]
+        print(
+            "Fusion safeguard: zero-weighting validation-degenerate heads selected at epoch 0: "
+            + ", ".join(excluded)
+        )
     fusion, fusion_history = fit_late_fusion(
         validation[["alpha_eeg", "beta_wearable"]].to_numpy(),
         validation[TARGET].to_numpy(),
         learning_rate=config.fusion_learning_rate,
         epochs=config.fusion_epochs,
         fallback_probability=float(train[TARGET].mean()),
+        eligible_modalities=eligible_modalities,
     )
     print(fusion_history.to_string(index=False))
     print(
@@ -221,6 +247,52 @@ def main(config_path: Path | None = None, *, rebuild_features: bool = False) -> 
     missing = missing_modality_scenarios(test, fusion)
     ablation = _ablation_table(test, missing)
     print_frame("PATIENT-SESSION TEST ABLATION", ablation)
+
+    # Exercise genuine source-data missingness without letting the incomplete
+    # participant influence fitting, validation, or headline test metrics.
+    incomplete_sessions = discover_incomplete_sessions(config)
+    real_missing = pd.DataFrame()
+    real_missing_audit = pd.DataFrame()
+    if not incomplete_sessions.empty:
+        print_frame("DISCOVERED REAL INCOMPLETE SESSIONS (INFERENCE ONLY)", incomplete_sessions)
+        real_missing, real_missing_audit = build_real_missing_modality_cases(
+            incomplete_sessions, config
+        )
+        if not real_missing.empty:
+            real_missing["alpha_eeg"] = np.nan
+            real_missing["beta_wearable"] = np.nan
+            eeg_rows = real_missing["eeg_available"].eq(1)
+            wearable_rows = real_missing["wearable_available"].eq(1)
+            if eeg_rows.any():
+                real_missing.loc[eeg_rows, "alpha_eeg"] = eeg_head.predict_proba(
+                    real_missing.loc[eeg_rows]
+                )
+            if wearable_rows.any():
+                real_missing.loc[wearable_rows, "beta_wearable"] = wearable_head.predict_proba(
+                    real_missing.loc[wearable_rows]
+                )
+            real_missing["combined_probability"] = fusion.predict(
+                real_missing[["alpha_eeg", "beta_wearable"]].to_numpy(float),
+                real_missing[["eeg_available", "wearable_available"]].to_numpy(bool),
+            )
+            print_frame(
+                "REAL MISSING-MODALITY CASE PREDICTIONS (NOT A PERFORMANCE ESTIMATE)",
+                real_missing[
+                    [
+                        "patient_id",
+                        "condition",
+                        "window_index",
+                        TARGET,
+                        "eeg_available",
+                        "wearable_available",
+                        "alpha_eeg",
+                        "beta_wearable",
+                        "combined_probability",
+                    ]
+                ],
+            )
+        if not real_missing_audit.empty:
+            print_frame("REAL MISSING-MODALITY EXTRACTION AUDIT", real_missing_audit)
 
     metrics = {
         "eeg": _metrics_for_column(test, "alpha_eeg"),
@@ -268,24 +340,54 @@ def main(config_path: Path | None = None, *, rebuild_features: bool = False) -> 
     )
     test.to_csv(config.output_dir / "test_window_predictions.csv", index=False)
     missing.to_csv(config.output_dir / "missing_modality_predictions.csv", index=False)
+    if not real_missing.empty:
+        real_missing.to_csv(
+            config.output_dir / "real_missing_modality_predictions.csv", index=False
+        )
+    if not real_missing_audit.empty:
+        real_missing_audit.to_csv(
+            config.output_dir / "real_missing_modality_audit.csv", index=False
+        )
     ablation.to_csv(config.output_dir / "ablation.csv", index=False)
     _save_json(config.output_dir / "metrics.json", metrics)
     _save_json(config.output_dir / "example_explanation.json", explanation_payload)
     print(f"\nSaved derived study artifacts to: {config.output_dir}")
 
 
-if __name__ == "__main__":
+def cli() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "study",
+        nargs="?",
+        choices=("eeg-wearable", "ehr-glucose"),
+        default="eeg-wearable",
+        help="Study to execute. The default preserves the original EEG/wearable run.",
+    )
     parser.add_argument(
         "--config",
         type=Path,
-        default=PROJECT_ROOT / "config" / "study.json",
-        help="Path to the study JSON configuration.",
+        default=None,
+        help="Optional JSON config. A study-specific default is used when omitted.",
     )
     parser.add_argument(
+        "--rebuild",
         "--rebuild-features",
+        dest="rebuild",
         action="store_true",
-        help="Re-extract real synchronized windows from the downloaded raw files.",
+        help="Rebuild the processed cohort from the real raw files.",
     )
     arguments = parser.parse_args()
-    main(arguments.config, rebuild_features=arguments.rebuild_features)
+    if arguments.study == "eeg-wearable":
+        config_path = arguments.config or PROJECT_ROOT / "config" / "study.json"
+        main(config_path, rebuild_features=arguments.rebuild)
+        return
+
+    from src.neuroglycemic.config import load_ehr_config
+    from src.neuroglycemic.pipeline import run_ehr_glucose_pipeline
+
+    config_path = arguments.config or PROJECT_ROOT / "config" / "ehr_glucose.json"
+    run_ehr_glucose_pipeline(load_ehr_config(config_path), rebuild=arguments.rebuild)
+
+
+if __name__ == "__main__":
+    cli()

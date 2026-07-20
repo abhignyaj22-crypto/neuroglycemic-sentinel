@@ -4,10 +4,10 @@
   "prediction_target": "cognitive_load_during_this_recorded_session",
   "alpha_eeg": 0.5,
   "beta_wearable": 0.1684910938552075,
-  "combined_probability": 0.21313213795208172,
+  "combined_probability": 0.1684910938552075,
   "fusion_weights": {
-    "eeg": 0.1346601652909332,
-    "wearable": 0.8653398347090667
+    "eeg": 0.0,
+    "wearable": 1.0
   },
   "eeg_linear_contributions": {
     "eeg_delta_mean": -0.0,

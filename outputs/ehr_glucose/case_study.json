@@ -1,0 +1,92 @@
+{
+  "request": {
+    "patient_id": "mimic_10003400",
+    "anchor_time": "2137-02-25T17:38:00"
+  },
+  "response": {
+    "patient_id": "mimic_10003400",
+    "anchor_time": "2137-02-25T17:38:00",
+    "horizon_hours": 6.0,
+    "predicted_glucose_mg_dl": 155.55027439361538,
+    "prediction_lower_mg_dl": 73.9941478514097,
+    "prediction_upper_mg_dl": 237.10640093582106,
+    "hyperglycemia_probability": 0.7009519858713749,
+    "abstained": false,
+    "warnings": [
+      "Hospital laboratory glucose is intermittent and is not continuous glucose monitoring."
+    ]
+  },
+  "actual_future_glucose_mg_dl": 125.0,
+  "actual_target_time": "2137-02-26T00:15:00",
+  "absolute_error_mg_dl": 30.550274393615382,
+  "interpretation": {
+    "future_minus_current_glucose_z_contributions": [
+      {
+        "feature": "ehr_potassium_age_hours",
+        "linear_contribution": 0.39535111579219545
+      },
+      {
+        "feature": "ehr_creatinine_age_hours",
+        "linear_contribution": -0.2878404123274753
+      },
+      {
+        "feature": "hours_since_previous_glucose",
+        "linear_contribution": 0.2005474144158133
+      },
+      {
+        "feature": "ehr_bicarbonate_age_hours",
+        "linear_contribution": 0.14855378540510955
+      },
+      {
+        "feature": "ehr_urea_nitrogen_age_hours",
+        "linear_contribution": -0.14707869291666895
+      },
+      {
+        "feature": "sex_female",
+        "linear_contribution": -0.09896794584928227
+      },
+      {
+        "feature": "ehr_magnesium_age_hours",
+        "linear_contribution": -0.09041593347428122
+      },
+      {
+        "feature": "age_years",
+        "linear_contribution": 0.07808754383002008
+      }
+    ],
+    "hyperglycemia_logit_contributions": [
+      {
+        "feature": "ehr_creatinine_age_hours",
+        "linear_contribution": -0.49730611746468967
+      },
+      {
+        "feature": "ehr_urea_nitrogen_age_hours",
+        "linear_contribution": -0.48782853507766233
+      },
+      {
+        "feature": "ehr_bicarbonate_age_hours",
+        "linear_contribution": 0.4170518179926683
+      },
+      {
+        "feature": "ehr_potassium_age_hours",
+        "linear_contribution": 0.4150525837857156
+      },
+      {
+        "feature": "ehr_sodium_age_hours",
+        "linear_contribution": 0.3853606643091984
+      },
+      {
+        "feature": "ehr_magnesium_age_hours",
+        "linear_contribution": 0.3500735495894753
+      },
+      {
+        "feature": "hours_since_previous_glucose",
+        "linear_contribution": 0.23603887957407205
+      },
+      {
+        "feature": "age_years",
+        "linear_contribution": 0.08408873048878608
+      }
+    ]
+  }
+}

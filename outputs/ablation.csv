@@ -1,8 +1,8 @@
 model_or_scenario,auroc,log_loss,accuracy,balanced_accuracy
 EEG only (alpha),0.5,0.6931471805599453,0.5,0.5
 wearable only (beta),1.0,0.3908802468699895,0.75,0.75
-learned late fusion,1.0,0.41994068899898085,0.75,0.75
-missingness: both_available,1.0,0.41994068899898085,0.75,0.75
+learned late fusion,1.0,0.3908802468699895,0.75,0.75
+missingness: both_available,1.0,0.3908802468699895,0.75,0.75
 missingness: eeg_missing,1.0,0.3908802468699895,0.75,0.75
 missingness: wearable_missing,0.5,0.6931471805599453,0.5,0.5
 missingness: both_missing,0.5,0.6931471805599453,0.5,0.5

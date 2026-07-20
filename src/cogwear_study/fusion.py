@@ -6,10 +6,18 @@ import pandas as pd
 from .model import binary_cross_entropy
 
 
-def _softmax(values: np.ndarray) -> np.ndarray:
-    shifted = values - np.max(values)
+def _softmax(values: np.ndarray, eligible: np.ndarray | None = None) -> np.ndarray:
+    values = np.asarray(values, dtype=float)
+    if eligible is None:
+        eligible = np.ones(len(values), dtype=bool)
+    eligible = np.asarray(eligible, dtype=bool)
+    if eligible.shape != values.shape or not eligible.any():
+        raise ValueError("At least one correctly shaped eligible modality is required.")
+    weights = np.zeros_like(values)
+    shifted = values[eligible] - np.max(values[eligible])
     exponent = np.exp(shifted)
-    return exponent / exponent.sum()
+    weights[eligible] = exponent / exponent.sum()
+    return weights
 
 
 @dataclass
@@ -46,6 +54,7 @@ def fit_late_fusion(
     epochs: int,
     modality_names: tuple[str, ...] = ("eeg", "wearable"),
     fallback_probability: float = 0.5,
+    eligible_modalities: np.ndarray | None = None,
 ) -> tuple[LateFusion, pd.DataFrame]:
     """Learn weighted-average fusion on validation patients only."""
     probabilities = np.asarray(validation_probabilities, dtype=float)
@@ -54,6 +63,11 @@ def fit_late_fusion(
         raise ValueError("Fusion fitting requires complete paired validation predictions.")
     if probabilities.shape[1] != len(modality_names):
         raise ValueError("One validation probability column is required per modality.")
+    if eligible_modalities is None:
+        eligible_modalities = np.ones(probabilities.shape[1], dtype=bool)
+    eligible_modalities = np.asarray(eligible_modalities, dtype=bool)
+    if eligible_modalities.shape != (probabilities.shape[1],) or not eligible_modalities.any():
+        raise ValueError("At least one modality head must be eligible for fusion.")
 
     raw_weights = np.zeros(probabilities.shape[1], dtype=float)
     best_raw = raw_weights.copy()
@@ -61,7 +75,7 @@ def fit_late_fusion(
     history: list[dict[str, float | int]] = []
 
     for epoch in range(epochs + 1):
-        weights = _softmax(raw_weights)
+        weights = _softmax(raw_weights, eligible_modalities)
         fused = probabilities @ weights
         loss = binary_cross_entropy(target, fused)
         if loss < best_loss:
@@ -86,11 +100,11 @@ def fit_late_fusion(
                 for k in range(probabilities.shape[1])
             ]
         )
-        raw_weights -= learning_rate * gradient
+        raw_weights[eligible_modalities] -= learning_rate * gradient[eligible_modalities]
 
     fusion = LateFusion(
         modality_names=modality_names,
-        weights=_softmax(best_raw),
+        weights=_softmax(best_raw, eligible_modalities),
         fallback_probability=float(fallback_probability),
     )
     return fusion, pd.DataFrame(history)

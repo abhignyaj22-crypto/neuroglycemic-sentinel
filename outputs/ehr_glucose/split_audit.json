@@ -1,0 +1,25 @@
+{
+  "partitions": {
+    "train": {
+      "rows": 409,
+      "patients": 48,
+      "hyperglycemia_prevalence": 0.17359413202933985
+    },
+    "test": {
+      "rows": 110,
+      "patients": 11,
+      "hyperglycemia_prevalence": 0.12727272727272726
+    },
+    "validation": {
+      "rows": 122,
+      "patients": 10,
+      "hyperglycemia_prevalence": 0.36065573770491804
+    }
+  },
+  "patient_overlap": {
+    "train_validation": [],
+    "train_test": [],
+    "validation_test": []
+  },
+  "patient_disjoint": true
+}

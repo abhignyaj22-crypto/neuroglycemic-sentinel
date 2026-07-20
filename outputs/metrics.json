@@ -30,20 +30,20 @@
   "late_fusion": {
     "window_level": {
       "auroc": 0.9722222222222223,
-      "log_loss": 0.4362805877118478,
+      "log_loss": 0.41450197855736093,
       "accuracy": 0.8333333333333334,
       "balanced_accuracy": 0.8333333333333333
     },
     "patient_session_level": {
       "auroc": 1.0,
-      "log_loss": 0.41994068899898085,
+      "log_loss": 0.3908802468699895,
       "accuracy": 0.75,
       "balanced_accuracy": 0.75
     }
   },
   "fusion_weights": {
-    "eeg": 0.1346601652909332,
-    "wearable": 0.8653398347090667
+    "eeg": 0.0,
+    "wearable": 1.0
   },
   "selected_checkpoints": {
     "eeg": {

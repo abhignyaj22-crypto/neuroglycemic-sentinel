@@ -1,0 +1,23 @@
+{
+  "source": "MIMIC-IV Clinical Database Demo 2.2",
+  "source_url": "https://physionet.org/content/mimic-iv-demo/2.2/",
+  "important_scope": "Intermittent hospital laboratory glucose, not ambulatory CGM.",
+  "files": {
+    "patients.csv.gz": {
+      "bytes": 1083,
+      "sha256": "59dcc6cd8450ddf03ad32cc7d76e41caa4c9633541715987f590c74835cf6fae"
+    },
+    "admissions.csv.gz": {
+      "bytes": 11072,
+      "sha256": "910b9f160ffdf1e08ea673585393f347c773ccc87d66875c627584a903ae8493"
+    },
+    "d_labitems.csv.gz": {
+      "bytes": 13520,
+      "sha256": "72ea5f020469fd24543bd98ab3bd0a4f645a5a4b7802d9d52af20d736f9d76db"
+    },
+    "labevents.csv.gz": {
+      "bytes": 1963979,
+      "sha256": "d51a4cf1ea63245abe7d544b0d50a928e9ee2ec5eb9a5ce85500aed0bd6c6dfc"
+    }
+  }
+}
