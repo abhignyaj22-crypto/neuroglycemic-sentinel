@@ -89,7 +89,7 @@ def comparison_table(test: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for name, column in (
         ("persistence_current_glucose", "current_glucose_mg_dl"),
-        ("probabilistic_multitask_ehr", "predicted_glucose_mg_dl"),
+        ("validation_shrunk_multitask_ehr", "predicted_glucose_mg_dl"),
     ):
         rows.append({"model": name, **forecast_metrics(test, column)})
     return pd.DataFrame(rows)

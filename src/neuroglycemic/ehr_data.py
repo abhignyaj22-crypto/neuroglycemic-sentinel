@@ -1,3 +1,4 @@
+from datetime import timedelta
 from pathlib import Path
 
 import numpy as np
@@ -160,19 +161,19 @@ def _latest_lab(
     concept: str,
     anchor_time: pd.Timestamp,
     lookback_hours: float,
-) -> tuple[float, float, int]:
+) -> tuple[float, float, int, pd.Timestamp | None]:
     series = lookup.get((hadm_id, concept))
     if series is None:
-        return float("nan"), float("nan"), 0
+        return float("nan"), float("nan"), 0, None
     times, values = series
     anchor64 = np.datetime64(anchor_time)
     index = int(np.searchsorted(times, anchor64, side="right") - 1)
     if index < 0:
-        return float("nan"), float("nan"), 0
+        return float("nan"), float("nan"), 0, None
     age_hours = float((anchor64 - times[index]) / np.timedelta64(1, "h"))
     if age_hours < 0 or age_hours > lookback_hours:
-        return float("nan"), float("nan"), 0
-    return float(values[index]), age_hours, 1
+        return float("nan"), float("nan"), 0, None
+    return float(values[index]), age_hours, 1, pd.Timestamp(times[index])
 
 
 def build_glucose_forecast_table(
@@ -239,7 +240,10 @@ def build_glucose_forecast_table(
 
             history = group.loc[
                 (group["storetime"] <= anchor_time)
-                & (group["storetime"] >= anchor_time - pd.Timedelta(hours=config.lookback_hours))
+                & (
+                    group["storetime"]
+                    >= anchor_time - timedelta(hours=float(config.lookback_hours))
+                )
             ].copy()
             if len(history) < config.min_glucose_history:
                 rejected["insufficient_history"] += 1
@@ -297,14 +301,14 @@ def build_glucose_forecast_table(
                 "glucose_max_24h": float(np.max(history_values)),
                 "glucose_slope_24h_mg_dl_per_hour": slope,
                 "glucose_count_24h": int(len(history_values)),
-                "feature_cutoff_verified": 1,
                 "target_after_anchor_verified": int(
                     pd.Timestamp(target["charttime"]) > anchor_time
                     and pd.Timestamp(target["storetime"]) > anchor_time
                 ),
             }
+            latest_feature_storetime = pd.Timestamp(history["storetime"].max())
             for concept in LAB_CONCEPT_LABELS:
-                value, age_hours, available = _latest_lab(
+                value, age_hours, available, event_time = _latest_lab(
                     context_lookup,
                     int(hadm_id),
                     concept,
@@ -314,6 +318,10 @@ def build_glucose_forecast_table(
                 row[f"ehr_{concept}_last"] = value
                 row[f"ehr_{concept}_age_hours"] = age_hours
                 row[f"ehr_{concept}_available"] = available
+                if event_time is not None:
+                    latest_feature_storetime = max(latest_feature_storetime, event_time)
+            row["max_feature_storetime"] = latest_feature_storetime
+            row["feature_cutoff_verified"] = int(latest_feature_storetime <= anchor_time)
             rows.append(row)
 
     frame = pd.DataFrame(rows)

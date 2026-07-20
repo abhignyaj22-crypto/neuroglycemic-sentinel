@@ -11,5 +11,6 @@
   "serialization_round_trip": true,
   "case_study_not_abstained": true,
   "clinical_performance_gate_passed": false,
+  "regression_blend_weight": 0.24,
   "release_recommendation": "research_only_do_not_deploy"
 }

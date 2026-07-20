@@ -1,0 +1,25 @@
+{
+    "recording_format": "XDF via LabRecorder",
+    "clock_policy": "LSL clock with clock-offset metadata; XDF offline synchronization",
+    "streams": [
+      {
+        "logical_modality": "eeg",
+        "supported_devices": ["Emotiv", "Galea", "Muse"],
+        "lsl_types": ["EEG", "POW", "MET"],
+        "required_metadata": ["source_id", "channel_labels", "nominal_srate", "units"]
+      },
+      {
+        "logical_modality": "wearable",
+        "supported_devices": ["iHealth", "Pulse", "Empatica", "Galea"],
+        "lsl_types": ["PPG", "BVP", "EDA", "Temperature", "HeartRate", "SpO2", "BloodPressure", "Steps"],
+        "required_metadata": ["source_id", "channel_labels", "nominal_srate", "units"]
+      },
+      {
+        "logical_modality": "reference_glucose",
+        "supported_devices": ["CGM"],
+        "lsl_types": ["CGM", "Glucose"],
+        "required_metadata": ["source_id", "units", "device_clock_value"]
+      }
+    ]
+  }
+  

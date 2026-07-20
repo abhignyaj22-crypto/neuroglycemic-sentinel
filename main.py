@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -88,13 +89,30 @@ def _ablation_table(test: pd.DataFrame, missing: pd.DataFrame) -> pd.DataFrame:
         rows.append({"model_or_scenario": name, **metrics})
 
     for scenario, group in missing.groupby("scenario", sort=False):
-        session = patient_session_predictions(group, "combined_probability")
-        metrics = classification_metrics(session[TARGET], session["probability"])
-        rows.append({"model_or_scenario": f"missingness: {scenario}", **metrics})
+        available = group.loc[np.isfinite(group["combined_probability"])].copy()
+        if available.empty:
+            metrics = {
+                "auroc": float("nan"),
+                "log_loss": float("nan"),
+                "accuracy": float("nan"),
+                "balanced_accuracy": float("nan"),
+            }
+        else:
+            session = patient_session_predictions(available, "combined_probability")
+            metrics = classification_metrics(session[TARGET], session["probability"])
+        rows.append(
+            {
+                "model_or_scenario": f"missingness: {scenario}",
+                **metrics,
+                "abstention_rate": float(group["combined_probability"].isna().mean()),
+            }
+        )
     return pd.DataFrame(rows)
 
 
-def main(config_path: Path | None = None, *, rebuild_features: bool = False) -> None:
+def main(
+    config_path: Path | None = None, *, rebuild_features: bool = False
+) -> dict[str, object]:
     pd.set_option("display.max_columns", 50)
     config_path = config_path or PROJECT_ROOT / "config" / "study.json"
     config = load_config(config_path)
@@ -351,7 +369,61 @@ def main(config_path: Path | None = None, *, rebuild_features: bool = False) -> 
     ablation.to_csv(config.output_dir / "ablation.csv", index=False)
     _save_json(config.output_dir / "metrics.json", metrics)
     _save_json(config.output_dir / "example_explanation.json", explanation_payload)
+
+    model_dir = config.output_dir / "models"
+    eeg_path = model_dir / "eeg_head.json"
+    wearable_path = model_dir / "wearable_head.json"
+    fusion_path = model_dir / "cognitive_load_fusion.json"
+    eeg_head.save(eeg_path)
+    wearable_head.save(wearable_path)
+    fusion.save(fusion_path)
+    reloaded_eeg = type(eeg_head).load(eeg_path)
+    reloaded_wearable = type(wearable_head).load(wearable_path)
+    reloaded_fusion = type(fusion).load(fusion_path)
+    reload_difference = max(
+        float(np.max(np.abs(reloaded_eeg.predict_proba(test) - test["alpha_eeg"]))),
+        float(
+            np.max(
+                np.abs(reloaded_wearable.predict_proba(test) - test["beta_wearable"])
+            )
+        ),
+        float(
+            np.max(
+                np.abs(
+                    reloaded_fusion.predict(
+                        test[["alpha_eeg", "beta_wearable"]].to_numpy(float)
+                    )
+                    - test["combined_probability"]
+                )
+            )
+        ),
+    )
+    acceptance = {
+        "patient_disjoint_split": not (
+            set(patient_split.train) & set(patient_split.validation)
+            or set(patient_split.train) & set(patient_split.test)
+            or set(patient_split.validation) & set(patient_split.test)
+        ),
+        "eeg_head_learned_nonzero_epoch": eeg_head.best_epoch > 0,
+        "wearable_head_learned_nonzero_epoch": wearable_head.best_epoch > 0,
+        "degenerate_head_zero_weighted": bool(
+            eeg_head.best_epoch > 0 or np.isclose(fusion.weights[0], 0.0)
+        ),
+        "all_modalities_missing_abstains": bool(
+            missing.loc[missing["scenario"] == "both_missing", "combined_probability"]
+            .isna()
+            .all()
+        ),
+        "serialization_max_absolute_difference": reload_difference,
+        "serialization_round_trip": reload_difference < 1e-10,
+        "clinical_release_ready": False,
+        "release_recommendation": "research_only_do_not_deploy",
+    }
+    _save_json(config.output_dir / "acceptance_checks.json", acceptance)
+    print("\nCOGWEAR ENGINEERING AND RESEARCH GATES")
+    print(json.dumps(acceptance, indent=2))
     print(f"\nSaved derived study artifacts to: {config.output_dir}")
+    return {"metrics": metrics, "acceptance_checks": acceptance}
 
 
 def cli() -> None:
@@ -359,7 +431,7 @@ def cli() -> None:
     parser.add_argument(
         "study",
         nargs="?",
-        choices=("eeg-wearable", "ehr-glucose"),
+        choices=("eeg-wearable", "ehr-glucose", "architecture", "lsl-audit"),
         default="eeg-wearable",
         help="Study to execute. The default preserves the original EEG/wearable run.",
     )
@@ -376,17 +448,79 @@ def cli() -> None:
         action="store_true",
         help="Rebuild the processed cohort from the real raw files.",
     )
+    parser.add_argument(
+        "--use-llm",
+        action="store_true",
+        help="Call the optional LangChain LLM inside HealthAgent after numerical inference.",
+    )
+    parser.add_argument(
+        "--llm-model",
+        default=os.environ.get("HEALTHAGENT_LLM_MODEL"),
+        help="LLM model name. Required with --use-llm (or set HEALTHAGENT_LLM_MODEL).",
+    )
+    parser.add_argument(
+        "--print-llm-raw",
+        action="store_true",
+        help="Include the raw LLM JSON response in HealthAgent telemetry.",
+    )
+    parser.add_argument(
+        "--xdf",
+        type=Path,
+        default=None,
+        help="LabRecorder XDF file to inspect with the lsl-audit command.",
+    )
     arguments = parser.parse_args()
     if arguments.study == "eeg-wearable":
         config_path = arguments.config or PROJECT_ROOT / "config" / "study.json"
         main(config_path, rebuild_features=arguments.rebuild)
         return
 
+
+    if arguments.study == "lsl-audit":
+        from src.neuroglycemic.lsl import audit_xdf, discover_streams
+
+        if arguments.xdf is None:
+            print_frame("DISCOVERED LSL STREAMS", discover_streams())
+        else:
+            audit, _ = audit_xdf(arguments.xdf)
+            print_frame("LABRECORDER XDF STREAM AUDIT", audit)
+        return
+
     from src.neuroglycemic.config import load_ehr_config
     from src.neuroglycemic.pipeline import run_ehr_glucose_pipeline
 
     config_path = arguments.config or PROJECT_ROOT / "config" / "ehr_glucose.json"
-    run_ehr_glucose_pipeline(load_ehr_config(config_path), rebuild=arguments.rebuild)
+    if arguments.study == "ehr-glucose":
+        run_ehr_glucose_pipeline(load_ehr_config(config_path), rebuild=arguments.rebuild)
+        return
+
+    # Full current architecture run: train/evaluate each scientifically supported
+    # task, then prove that unrelated patient/target records cannot be fused.
+    main(PROJECT_ROOT / "config" / "study.json", rebuild_features=arguments.rebuild)
+    run_ehr_glucose_pipeline(
+        load_ehr_config(PROJECT_ROOT / "config" / "ehr_glucose.json"),
+        rebuild=arguments.rebuild,
+    )
+    from src.neuroglycemic.architecture import run_architecture_case
+    from src.neuroglycemic.health_agent import HealthAgent, build_openai_llm
+
+    llm = None
+    if arguments.use_llm:
+        if not arguments.llm_model:
+            parser.error("--use-llm requires --llm-model or HEALTHAGENT_LLM_MODEL.")
+        llm = build_openai_llm(model=arguments.llm_model)
+    agent = HealthAgent(
+        llm=llm,
+        provider="openai" if llm is not None else None,
+        model_name=arguments.llm_model,
+    )
+    architecture = run_architecture_case(
+        PROJECT_ROOT,
+        health_agent=agent,
+        include_raw_llm_response=arguments.print_llm_raw,
+    )
+    print("\nEND-TO-END ARCHITECTURE CASE STUDY")
+    print(json.dumps(architecture, indent=2))
 
 
 if __name__ == "__main__":

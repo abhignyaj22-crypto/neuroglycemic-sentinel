@@ -3,8 +3,8 @@
   "condition": "baseline",
   "prediction_target": "cognitive_load_during_this_recorded_session",
   "alpha_eeg": 0.5,
-  "beta_wearable": 0.1684910938552075,
-  "combined_probability": 0.1684910938552075,
+  "beta_wearable": 0.16849109385520866,
+  "combined_probability": 0.16849109385520866,
   "fusion_weights": {
     "eeg": 0.0,
     "wearable": 1.0
@@ -16,10 +16,10 @@
     "eeg_beta_mean": -0.0
   },
   "wearable_linear_contributions": {
-    "wearable_pulse_interval_rmssd_ms": -1.1730942571133292,
-    "wearable_bvp_variability": -0.5635639552750027,
-    "wearable_pulse_rate_bpm": -0.3682862228715059,
-    "wearable_eda_mean": 0.3604020113284951
+    "wearable_pulse_interval_rmssd_ms": -1.1730942571133272,
+    "wearable_bvp_variability": -0.5635639552750037,
+    "wearable_pulse_rate_bpm": -0.3682862228715035,
+    "wearable_eda_mean": 0.36040201132849736
   },
   "limitations": [
     "Research output, not a diagnosis or clinical recommendation.",

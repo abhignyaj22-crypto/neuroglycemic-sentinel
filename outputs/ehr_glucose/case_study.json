@@ -7,9 +7,9 @@
     "patient_id": "mimic_10003400",
     "anchor_time": "2137-02-25T17:38:00",
     "horizon_hours": 6.0,
-    "predicted_glucose_mg_dl": 155.55027439361538,
-    "prediction_lower_mg_dl": 73.9941478514097,
-    "prediction_upper_mg_dl": 237.10640093582106,
+    "predicted_glucose_mg_dl": 142.2120658544693,
+    "prediction_lower_mg_dl": 60.65593931226363,
+    "prediction_upper_mg_dl": 223.76819239667498,
     "hyperglycemia_probability": 0.7009519858713749,
     "abstained": false,
     "warnings": [
@@ -18,7 +18,7 @@
   },
   "actual_future_glucose_mg_dl": 125.0,
   "actual_target_time": "2137-02-26T00:15:00",
-  "absolute_error_mg_dl": 30.550274393615382,
+  "absolute_error_mg_dl": 17.2120658544693,
   "interpretation": {
     "future_minus_current_glucose_z_contributions": [
       {
@@ -27,37 +27,37 @@
       },
       {
         "feature": "ehr_creatinine_age_hours",
-        "linear_contribution": -0.2878404123274753
+        "linear_contribution": -0.28784041232747537
       },
       {
         "feature": "hours_since_previous_glucose",
-        "linear_contribution": 0.2005474144158133
+        "linear_contribution": 0.20054741441581325
       },
       {
         "feature": "ehr_bicarbonate_age_hours",
-        "linear_contribution": 0.14855378540510955
+        "linear_contribution": 0.1485537854051095
       },
       {
         "feature": "ehr_urea_nitrogen_age_hours",
-        "linear_contribution": -0.14707869291666895
+        "linear_contribution": -0.14707869291666897
       },
       {
         "feature": "sex_female",
-        "linear_contribution": -0.09896794584928227
+        "linear_contribution": -0.0989679458492823
       },
       {
         "feature": "ehr_magnesium_age_hours",
-        "linear_contribution": -0.09041593347428122
+        "linear_contribution": -0.09041593347428123
       },
       {
         "feature": "age_years",
-        "linear_contribution": 0.07808754383002008
+        "linear_contribution": 0.0780875438300201
       }
     ],
     "hyperglycemia_logit_contributions": [
       {
         "feature": "ehr_creatinine_age_hours",
-        "linear_contribution": -0.49730611746468967
+        "linear_contribution": -0.4973061174646897
       },
       {
         "feature": "ehr_urea_nitrogen_age_hours",

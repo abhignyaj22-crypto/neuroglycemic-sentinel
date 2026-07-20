@@ -140,6 +140,7 @@ class ProbabilisticGlucoseModel:
     best_epoch: int
     best_validation_loss: float
     training_metadata: dict[str, Any]
+    regression_blend_weight: float = 1.0
 
     def predict(self, frame: pd.DataFrame) -> pd.DataFrame:
         x = self.standardizer.transform(frame[list(self.feature_names)].to_numpy(dtype=float))
@@ -149,23 +150,21 @@ class ProbabilisticGlucoseModel:
         critical_value = NormalDist().inv_cdf(1.0 - alpha / 2.0)
 
         center = self.target_center + self.target_scale * mean_z
-        lower_center = self.target_center + self.target_scale * (
-            mean_z - critical_value * sigma_z
-        )
-        upper_center = self.target_center + self.target_scale * (
-            mean_z + critical_value * sigma_z
-        )
+        sigma = self.target_scale * sigma_z
         if self.regression_target == "delta_from_reference":
             if self.reference_feature is None:
                 raise ValueError("A reference feature is required for residual forecasting.")
             reference = frame[self.reference_feature].to_numpy(dtype=float)
-            predicted = reference + center
-            lower = reference + lower_center
-            upper = reference + upper_center
+            # The raw residual model is shrunk toward the persistence baseline
+            # using validation patients only. Predictive uncertainty is retained
+            # around the calibrated center rather than collapsing with the mean.
+            predicted = reference + self.regression_blend_weight * center
+            lower = predicted - critical_value * sigma
+            upper = predicted + critical_value * sigma
         elif self.regression_target == "log1p_absolute":
             predicted = np.expm1(center)
-            lower = np.expm1(lower_center)
-            upper = np.expm1(upper_center)
+            lower = np.expm1(center - critical_value * sigma)
+            upper = np.expm1(center + critical_value * sigma)
         else:
             raise ValueError(f"Unknown regression target: {self.regression_target}")
         probability = sigmoid(
@@ -193,7 +192,7 @@ class ProbabilisticGlucoseModel:
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "schema_version": "ehr-glucose-model-v2",
+            "schema_version": "ehr-glucose-model-v3",
             "feature_names": list(self.feature_names),
             "standardizer": {
                 "medians": self.standardizer.medians.tolist(),
@@ -216,13 +215,17 @@ class ProbabilisticGlucoseModel:
             "best_epoch": self.best_epoch,
             "best_validation_loss": self.best_validation_loss,
             "training_metadata": self.training_metadata,
+            "regression_blend_weight": self.regression_blend_weight,
         }
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     @classmethod
     def load(cls, path: Path) -> "ProbabilisticGlucoseModel":
         payload = json.loads(path.read_text(encoding="utf-8"))
-        if payload.get("schema_version") != "ehr-glucose-model-v2":
+        if payload.get("schema_version") not in {
+            "ehr-glucose-model-v2",
+            "ehr-glucose-model-v3",
+        }:
             raise ValueError("Unsupported glucose model schema.")
         scaler = payload["standardizer"]
         parameters = payload["parameters"]
@@ -251,6 +254,7 @@ class ProbabilisticGlucoseModel:
             best_epoch=int(payload["best_epoch"]),
             best_validation_loss=float(payload["best_validation_loss"]),
             training_metadata=dict(payload["training_metadata"]),
+            regression_blend_weight=float(payload.get("regression_blend_weight", 1.0)),
         )
 
 
@@ -407,6 +411,39 @@ def fit_probabilistic_glucose_model(
                 learning_rate=learning_rate,
             )
 
+    # Select how much of the learned residual to add to persistence using only
+    # validation patients. This makes the baseline comparison part of model
+    # selection, not a post-hoc test-set adjustment.
+    validation_mean_z = (
+        x_validation @ best_parameters.regression_weights + best_parameters.regression_bias
+    )
+    validation_delta = target_center + target_scale * validation_mean_z
+    validation_target = validation[target_regression_column].to_numpy(dtype=float)
+
+    if regression_target == "delta_from_reference":
+        validation_reference = validation[reference_feature].to_numpy(dtype=float)
+
+        def patient_macro_mae(weight: float) -> float:
+            candidate = validation_reference + weight * validation_delta
+            errors = pd.DataFrame(
+                {
+                    "patient_id": validation["patient_id"].to_numpy(),
+                    "absolute_error": np.abs(candidate - validation_target),
+                }
+            )
+            return float(errors.groupby("patient_id")["absolute_error"].mean().mean())
+
+        blend_candidates = np.linspace(0.0, 1.0, 101)
+        blend_losses = np.array([patient_macro_mae(float(value)) for value in blend_candidates])
+        best_blend_index = int(np.argmin(blend_losses))
+        regression_blend_weight = float(blend_candidates[best_blend_index])
+        persistence_validation_mae = float(blend_losses[0])
+        selected_validation_mae = float(blend_losses[best_blend_index])
+    else:
+        regression_blend_weight = 1.0
+        persistence_validation_mae = float("nan")
+        selected_validation_mae = float("nan")
+
     metadata = {
         **training_metadata,
         "positive_class_weight": positive_weight,
@@ -415,6 +452,13 @@ def fit_probabilistic_glucose_model(
             if regression_target == "delta_from_reference"
             else "Gaussian NLL on standardized log1p glucose + weighted BCE"
         ),
+        "regression_blend_selection": {
+            "criterion": "validation patient-macro MAE",
+            "candidate_range": [0.0, 1.0],
+            "selected_weight": regression_blend_weight,
+            "persistence_validation_mae_mg_dl": persistence_validation_mae,
+            "selected_validation_mae_mg_dl": selected_validation_mae,
+        },
     }
     model = ProbabilisticGlucoseModel(
         feature_names=feature_names,
@@ -429,5 +473,6 @@ def fit_probabilistic_glucose_model(
         best_epoch=best_epoch,
         best_validation_loss=best_validation_loss,
         training_metadata=metadata,
+        regression_blend_weight=regression_blend_weight,
     )
     return model, pd.DataFrame(history)

@@ -1,0 +1,258 @@
+
+SESSION INDEX (one patient-condition row)
+shape: (20, 8)
+columns (8): ['patient_id', 'participant_number', 'condition', 'target_cognitive_load', 'eeg_path', 'bvp_path', 'eda_path', 'temp_path']
+head(5):
+patient_id  participant_number      condition  target_cognitive_load                                                                                                                  eeg_path                                                                                                                      bvp_path                                                                                                                      eda_path                                                                                                                      temp_path
+cogwear_00                   0       baseline                      0       /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/0/baseline/muse_eeg.csv       /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/0/baseline/empatica_bvp.csv       /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/0/baseline/empatica_eda.csv       /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/0/baseline/empatica_temp.csv
+cogwear_00                   0 cognitive_load                      1 /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/0/cognitive_load/muse_eeg.csv /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/0/cognitive_load/empatica_bvp.csv /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/0/cognitive_load/empatica_eda.csv /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/0/cognitive_load/empatica_temp.csv
+cogwear_01                   1       baseline                      0       /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/1/baseline/muse_eeg.csv       /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/1/baseline/empatica_bvp.csv       /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/1/baseline/empatica_eda.csv       /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/1/baseline/empatica_temp.csv
+cogwear_01                   1 cognitive_load                      1 /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/1/cognitive_load/muse_eeg.csv /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/1/cognitive_load/empatica_bvp.csv /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/1/cognitive_load/empatica_eda.csv /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/1/cognitive_load/empatica_temp.csv
+cogwear_02                   2       baseline                      0       /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/2/baseline/muse_eeg.csv       /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/2/baseline/empatica_bvp.csv       /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/2/baseline/empatica_eda.csv       /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/2/baseline/empatica_temp.csv
+
+RAW DATA CHECK: cogwear_00 / baseline (the complete cohort is used later)
+              stream    bytes                                                                                                                     path
+            Muse EEG 28110029      /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/0/baseline/muse_eeg.csv
+        Empatica BVP   313017  /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/0/baseline/empatica_bvp.csv
+        Empatica EDA    18901  /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/0/baseline/empatica_eda.csv
+Empatica temperature    16493 /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/0/baseline/empatica_temp.csv
+
+Muse EEG
+shape: (5, 40)
+columns (40): ['Delta_TP9', 'Delta_AF7', 'Delta_AF8', 'Delta_TP10', 'Theta_TP9', 'Theta_AF7', 'Theta_AF8', 'Theta_TP10', 'Alpha_TP9', 'Alpha_AF7', 'Alpha_AF8', 'Alpha_TP10', 'Beta_TP9', 'Beta_AF7', 'Beta_AF8', 'Beta_TP10', 'Gamma_TP9', 'Gamma_AF7', 'Gamma_AF8', 'Gamma_TP10', 'RAW_TP9', 'RAW_AF7', 'RAW_AF8', 'RAW_TP10', 'AUX_RIGHT', 'AUX_LEFT', 'Accelerometer_X', 'Accelerometer_Y', 'Accelerometer_Z', 'Gyro_X', 'Gyro_Y', 'Gyro_Z', 'HeadBandOn', 'HSI_TP9', 'HSI_AF7', 'HSI_AF8', 'HSI_TP10', 'Battery', 'Elements', 'time']
+head(5):
+ Delta_TP9  Delta_AF7  Delta_AF8  Delta_TP10  Theta_TP9  Theta_AF7  Theta_AF8  Theta_TP10  Alpha_TP9  Alpha_AF7  Alpha_AF8  Alpha_TP10  Beta_TP9  Beta_AF7  Beta_AF8  Beta_TP10  Gamma_TP9  Gamma_AF7  Gamma_AF8  Gamma_TP10    RAW_TP9    RAW_AF7    RAW_AF8   RAW_TP10  AUX_RIGHT   AUX_LEFT  Accelerometer_X  Accelerometer_Y  Accelerometer_Z    Gyro_X    Gyro_Y     Gyro_Z  HeadBandOn  HSI_TP9  HSI_AF7  HSI_AF8  HSI_TP10  Battery  Elements         time
+  0.317735   0.311167   0.803114    0.513023   0.354085  -0.004781   0.290984   -0.013419   0.174357    0.41792   0.488553    0.669377  1.059527  0.670141  0.361157    1.03318   1.003732   0.549925   -0.18329    1.063157 802.637363 747.032967 798.205128 786.117216 952.124542 855.421245        -0.148987         0.294739         0.961426 10.310516 12.441406 -12.239532         1.0      2.0      1.0      1.0       2.0     20.0       NaN 1.767085e+09
+  0.317735   0.311167   0.803114    0.513023   0.354085  -0.004781   0.290984   -0.013419   0.174357    0.41792   0.488553    0.669377  1.059527  0.670141  0.361157    1.03318   1.003732   0.549925   -0.18329    1.063157 794.578755 728.901099 797.399267 820.366300 799.010989 568.534799        -0.148987         0.294739         0.961426 10.310516 12.441406 -12.239532         1.0      2.0      1.0      1.0       2.0     20.0       NaN 1.767085e+09
+  0.317735   0.311167   0.803114    0.513023   0.354085  -0.004781   0.290984   -0.013419   0.174357    0.41792   0.488553    0.669377  1.059527  0.670141  0.361157    1.03318   1.003732   0.549925   -0.18329    1.063157 823.589744 715.201465 791.355311 835.677656 330.402930 156.336996        -0.148987         0.294739         0.961426 10.310516 12.441406 -12.239532         1.0      2.0      1.0      1.0       2.0     20.0       NaN 1.767085e+09
+  0.317735   0.311167   0.803114    0.513023   0.354085  -0.004781   0.290984   -0.013419   0.174357    0.41792   0.488553    0.669377  1.059527  0.670141  0.361157    1.03318   1.003732   0.549925   -0.18329    1.063157 839.706960 751.062271 792.161172 797.399267 228.461538 213.553114        -0.148987         0.294739         0.961426 10.310516 12.441406 -12.239532         1.0      2.0      1.0      1.0       2.0     20.0       NaN 1.767085e+09
+  0.317735   0.311167   0.803114    0.513023   0.354085  -0.004781   0.290984   -0.013419   0.174357    0.41792   0.488553    0.669377  1.059527  0.670141  0.361157    1.03318   1.003732   0.549925   -0.18329    1.063157 744.615385 776.043956 793.772894 774.432234 334.835165 307.838828        -0.148987         0.294739         0.961426 10.310516 12.441406 -12.239532         1.0      2.0      1.0      1.0       2.0     20.0       NaN 1.767085e+09
+
+Empatica BVP
+shape: (5, 2)
+columns (2): ['bvp', 'time']
+head(5):
+   bvp         time
+  9.65 1.767085e+09
+  4.69 1.767085e+09
+ -0.67 1.767085e+09
+ -6.82 1.767085e+09
+-13.98 1.767085e+09
+
+Empatica EDA
+shape: (5, 2)
+columns (2): ['eda', 'time']
+head(5):
+     eda         time
+0.289407 1.767085e+09
+0.340629 1.767085e+09
+0.311176 1.767085e+09
+0.304773 1.767085e+09
+0.303493 1.767085e+09
+
+Empatica temperature
+shape: (5, 2)
+columns (2): ['temp', 'time']
+head(5):
+ temp         time
+34.07 1.767085e+09
+34.07 1.767085e+09
+34.07 1.767085e+09
+34.07 1.767085e+09
+34.07 1.767085e+09
+
+Wearable variables considered for this study: BVP - A PPG-derived pulse rate and pulse-interval variability, EDA - Electrodermal Activity, and skin temperature.
+TBD: step count, blood pressure, SpO2, glucose, diagnoses, medications, and EHR fields.
+
+PAIRED EEG + WEARABLE FEATURE TABLE
+shape: (80, 28)
+columns (28): ['patient_id', 'condition', 'window_index', 'window_start_unix', 'target_cognitive_load', 'eeg_available', 'wearable_available', 'eeg_delta_mean', 'eeg_delta_variability', 'eeg_theta_mean', 'eeg_theta_variability', 'eeg_alpha_mean', 'eeg_alpha_variability', 'eeg_beta_mean', 'eeg_beta_variability', 'eeg_gamma_mean', 'eeg_gamma_variability', 'eeg_theta_alpha_ratio', 'eeg_beta_alpha_ratio', 'wearable_pulse_rate_bpm', 'wearable_pulse_interval_rmssd_ms', 'wearable_bvp_variability', 'wearable_eda_mean', 'wearable_eda_variability', 'wearable_eda_slope', 'wearable_temperature_mean', 'wearable_temperature_variability', 'wearable_temperature_slope']
+head(5):
+patient_id condition  window_index  window_start_unix  target_cognitive_load  eeg_available  wearable_available  eeg_delta_mean  eeg_delta_variability  eeg_theta_mean  eeg_theta_variability  eeg_alpha_mean  eeg_alpha_variability  eeg_beta_mean  eeg_beta_variability  eeg_gamma_mean  eeg_gamma_variability  eeg_theta_alpha_ratio  eeg_beta_alpha_ratio  wearable_pulse_rate_bpm  wearable_pulse_interval_rmssd_ms  wearable_bvp_variability  wearable_eda_mean  wearable_eda_variability  wearable_eda_slope  wearable_temperature_mean  wearable_temperature_variability  wearable_temperature_slope
+cogwear_00  baseline             0       1767084724.0                      0              1                   1        0.361060               0.385104        0.184114               0.263952        0.460255               0.242126       0.614073              0.407927        0.461024               0.496206              -0.276141              0.153817                78.115632                        202.066499                 26.332487           0.280528                  0.004297           -0.000444                  33.958833                          0.021023                   -0.002078
+cogwear_00  baseline             1       1767084754.0                      0              1                   1        0.186357               0.343885        0.064143               0.338107        0.442212               0.239245       0.662614              0.332770        0.514219               0.379382              -0.378070              0.220402                82.447665                        140.736245                 27.666855           0.273378                  0.002624           -0.000152                  33.918333                          0.013060                   -0.000924
+cogwear_00  baseline             2       1767084784.0                      0              1                   1        0.148422               0.322245        0.071589               0.270375        0.416101               0.259446       0.606193              0.344509        0.392207               0.371566              -0.344512              0.190092                85.333333                        173.746909                 24.981836           0.271788                  0.003124           -0.000176                  33.880083                          0.023470                   -0.001971
+cogwear_00  baseline             3       1767084814.0                      0              1                   1        0.315865               0.371471        0.137001               0.315627        0.495739               0.285562       0.630052              0.279513        0.372233               0.361448              -0.358738              0.134313                85.056726                        132.306020                 23.908827           0.264820                  0.003350           -0.000248                  33.824917                          0.017842                   -0.001494
+cogwear_00  baseline             4       1767084844.0                      0              1                   1        0.330874               0.370319        0.206692               0.363413        0.527792               0.294341       0.656114              0.311483        0.515253               0.355800              -0.321101              0.128321                83.206934                        224.693189                 46.965408           0.261821                  0.004159            0.000297                  33.777833                          0.021023                   -0.001844
+
+RAW SESSION AUDIT
+shape: (20, 9)
+columns (9): ['patient_id', 'condition', 'eeg_rows', 'bvp_rows', 'eda_rows', 'temperature_rows', 'overlap_seconds', 'windows_kept', 'windows_used_after_balancing']
+head(5):
+patient_id      condition  eeg_rows  bvp_rows  eda_rows  temperature_rows  overlap_seconds  windows_kept  windows_used_after_balancing
+cogwear_00       baseline     48072     12944       807               805          187.538             5                             5
+cogwear_00 cognitive_load     70980     19136      1194              1198          277.171             6                             5
+cogwear_01       baseline     29844      7461       467               467          116.500             3                             3
+cogwear_01 cognitive_load     55102     14656       916               916          228.750             6                             3
+cogwear_02       baseline     46440     11611       726               726          181.250             5                             5
+
+PATIENT-LEVEL TRAIN / VALIDATION / TEST SPLIT
+shape: (10, 2)
+columns (2): ['patient_id', 'split']
+head(5):
+patient_id split
+cogwear_01  test
+cogwear_09  test
+cogwear_00 train
+cogwear_02 train
+cogwear_04 train
+
+Rows by split and label:
+target_cognitive_load   0   1
+split                        
+test                    6   6
+train                  28  28
+validation              6   6
+
+Evaluation warning: the held-out test set contains only 2 participants. Metrics are pipeline checks, not stable clinical estimates.
+
+TRAIN EEG HEAD: 12 features, learning_rate=0.05, epochs=2000, L2=0.01
+ epoch  train_loss  validation_loss
+     0    0.693147         0.693147
+   200    0.422259         1.435944
+   400    0.402724         1.690866
+   600    0.396071         1.810532
+   800    0.393124         1.875015
+  1000    0.391679         1.912954
+  1200    0.390924         1.936562
+  1400    0.390509         1.951722
+  1600    0.390268         1.961589
+  1800    0.390122         1.968017
+  2000    0.390030         1.972168
+EEG checkpoint selected at epoch 0 (validation_loss=0.693147).
+EEG standardized coefficients (largest magnitude first):
+              feature  standardized_coefficient  absolute_coefficient
+       eeg_delta_mean                       0.0                   0.0
+       eeg_theta_mean                       0.0                   0.0
+       eeg_alpha_mean                       0.0                   0.0
+        eeg_beta_mean                       0.0                   0.0
+       eeg_gamma_mean                       0.0                   0.0
+eeg_delta_variability                       0.0                   0.0
+eeg_theta_variability                       0.0                   0.0
+eeg_alpha_variability                       0.0                   0.0
+ eeg_beta_variability                       0.0                   0.0
+eeg_gamma_variability                       0.0                   0.0
+eeg_theta_alpha_ratio                       0.0                   0.0
+ eeg_beta_alpha_ratio                       0.0                   0.0
+
+TRAIN WEARABLE HEAD: 9 features, learning_rate=0.05, epochs=2000, L2=0.01
+ epoch  train_loss  validation_loss
+     0    0.693147         0.693147
+   200    0.396409         0.622764
+   400    0.345233         0.658660
+   600    0.327962         0.685540
+   800    0.320586         0.703211
+  1000    0.317026         0.714964
+  1200    0.315181         0.723011
+  1400    0.314183         0.728686
+  1600    0.313628         0.732793
+  1800    0.313313         0.735830
+  2000    0.313132         0.738115
+Wearable checkpoint selected at epoch 121 (validation_loss=0.614713).
+Wearable standardized coefficients (largest magnitude first):
+                         feature  standardized_coefficient  absolute_coefficient
+        wearable_bvp_variability                  0.828187              0.828187
+wearable_pulse_interval_rmssd_ms                  0.615731              0.615731
+         wearable_pulse_rate_bpm                  0.329558              0.329558
+       wearable_temperature_mean                  0.270169              0.270169
+               wearable_eda_mean                 -0.217163              0.217163
+        wearable_eda_variability                  0.189334              0.189334
+wearable_temperature_variability                  0.159180              0.159180
+              wearable_eda_slope                  0.147860              0.147860
+      wearable_temperature_slope                 -0.016122              0.016122
+
+TRAIN LATE FUSION: learning_rate=0.1, epochs=1000
+Fusion safeguard: zero-weighting validation-degenerate heads selected at epoch 0: eeg
+ epoch  validation_loss  weight_eeg  weight_wearable
+     0         0.614713         0.0              1.0
+   100         0.614713         0.0              1.0
+   200         0.614713         0.0              1.0
+   300         0.614713         0.0              1.0
+   400         0.614713         0.0              1.0
+   500         0.614713         0.0              1.0
+   600         0.614713         0.0              1.0
+   700         0.614713         0.0              1.0
+   800         0.614713         0.0              1.0
+   900         0.614713         0.0              1.0
+  1000         0.614713         0.0              1.0
+Learned weights: eeg=0.0000, wearable=1.0000
+
+HELD-OUT TEST PREDICTIONS
+shape: (12, 7)
+columns (7): ['patient_id', 'condition', 'window_index', 'target_cognitive_load', 'alpha_eeg', 'beta_wearable', 'combined_probability']
+head(5):
+patient_id      condition  window_index  target_cognitive_load  alpha_eeg  beta_wearable  combined_probability
+cogwear_01       baseline             0                      0        0.5       0.168491              0.168491
+cogwear_01       baseline             1                      0        0.5       0.218307              0.218307
+cogwear_01       baseline             2                      0        0.5       0.169242              0.169242
+cogwear_01 cognitive_load             0                      1        0.5       0.822855              0.822855
+cogwear_01 cognitive_load             1                      1        0.5       0.804804              0.804804
+
+PATIENT-SESSION TEST ABLATION
+shape: (7, 5)
+columns (5): ['model_or_scenario', 'auroc', 'log_loss', 'accuracy', 'balanced_accuracy']
+head(5):
+          model_or_scenario  auroc  log_loss  accuracy  balanced_accuracy
+           EEG only (alpha)    0.5  0.693147      0.50               0.50
+       wearable only (beta)    1.0  0.390880      0.75               0.75
+        learned late fusion    1.0  0.390880      0.75               0.75
+missingness: both_available    1.0  0.390880      0.75               0.75
+   missingness: eeg_missing    1.0  0.390880      0.75               0.75
+
+DISCOVERED REAL INCOMPLETE SESSIONS (INFERENCE ONLY)
+shape: (2, 11)
+columns (11): ['patient_id', 'participant_number', 'condition', 'target_cognitive_load', 'eeg_path', 'bvp_path', 'eda_path', 'temp_path', 'eeg_available', 'wearable_available', 'missing_files']
+head(5):
+patient_id  participant_number      condition  target_cognitive_load                                                                                                                  eeg_path                                                                                                                      bvp_path                                                                                                                      eda_path                                                                                                                      temp_path  eeg_available  wearable_available                  missing_files
+cogwear_03                   3       baseline                      0       /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/3/baseline/muse_eeg.csv       /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/3/baseline/empatica_bvp.csv       /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/3/baseline/empatica_eda.csv       /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/3/baseline/empatica_temp.csv              0                   1                   muse_eeg.csv
+cogwear_03                   3 cognitive_load                      1 /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/3/cognitive_load/muse_eeg.csv /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/3/cognitive_load/empatica_bvp.csv /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/3/cognitive_load/empatica_eda.csv /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/data/raw/cogwear/pilot/3/cognitive_load/empatica_temp.csv              0                   0 muse_eeg.csv, empatica_eda.csv
+
+REAL MISSING-MODALITY CASE PREDICTIONS (NOT A PERFORMANCE ESTIMATE)
+shape: (2, 9)
+columns (9): ['patient_id', 'condition', 'window_index', 'target_cognitive_load', 'eeg_available', 'wearable_available', 'alpha_eeg', 'beta_wearable', 'combined_probability']
+head(5):
+patient_id condition  window_index  target_cognitive_load  eeg_available  wearable_available  alpha_eeg  beta_wearable  combined_probability
+cogwear_03  baseline             0                      0              0                   1        NaN       0.130870              0.130870
+cogwear_03  baseline             1                      0              0                   1        NaN       0.128155              0.128155
+
+REAL MISSING-MODALITY EXTRACTION AUDIT
+shape: (2, 6)
+columns (6): ['patient_id', 'condition', 'reason', 'eeg_available', 'wearable_available', 'windows_kept']
+head(5):
+patient_id      condition                                  reason  eeg_available  wearable_available  windows_kept
+cogwear_03       baseline real incomplete session; inference only            0.0                 1.0             2
+cogwear_03 cognitive_load             no complete modality bundle            NaN                 NaN             0
+
+HEALTHAGENT EXAMPLE (deterministic, grounded wording)
+Participant cogwear_01 / baseline: EEG alpha=0.500, wearable beta=0.168, combined cognitive-load probability=0.168. Learned fusion weights were EEG=0.000 and wearable=1.000. Interpret only as a small-cohort research result, not a diagnosis.
+{
+  "patient_id": "cogwear_01",
+  "condition": "baseline",
+  "prediction_target": "cognitive_load_during_this_recorded_session",
+  "alpha_eeg": 0.5,
+  "beta_wearable": 0.1684910938552075,
+  "combined_probability": 0.1684910938552075,
+  "fusion_weights": {
+    "eeg": 0.0,
+    "wearable": 1.0
+  },
+  "eeg_linear_contributions": {
+    "eeg_delta_mean": -0.0,
+    "eeg_theta_mean": -0.0,
+    "eeg_alpha_mean": 0.0,
+    "eeg_beta_mean": -0.0
+  },
+  "wearable_linear_contributions": {
+    "wearable_pulse_interval_rmssd_ms": -1.1730942571133292,
+    "wearable_bvp_variability": -0.5635639552750027,
+    "wearable_pulse_rate_bpm": -0.3682862228715059,
+    "wearable_eda_mean": 0.3604020113284951
+  },
+  "limitations": [
+    "Research output, not a diagnosis or clinical recommendation.",
+    "CogWear labels rest versus Stroop cognitive load; they are not stress, anxiety, depression, or diabetes labels.",
+    "The paired pilot analysis has only 10 complete participants, so uncertainty is high."
+  ]
+}
+
+Saved derived study artifacts to: /home/aj0486@students.ad.unt.edu/pipelinedvxr/neuroglycemic-sentinel/outputs

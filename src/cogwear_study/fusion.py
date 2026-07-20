@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -27,7 +29,11 @@ class LateFusion:
     fallback_probability: float
 
     def predict(
-        self, probabilities: np.ndarray, availability: np.ndarray | None = None
+        self,
+        probabilities: np.ndarray,
+        availability: np.ndarray | None = None,
+        *,
+        abstain_if_all_missing: bool = False,
     ) -> np.ndarray:
         probabilities = np.asarray(probabilities, dtype=float)
         if probabilities.ndim == 1:
@@ -43,7 +49,30 @@ class LateFusion:
         result = np.full(len(probabilities), self.fallback_probability, dtype=float)
         present = denominator > 0
         result[present] = weighted[present].sum(axis=1) / denominator[present]
+        if abstain_if_all_missing:
+            result[~present] = np.nan
         return result
+
+    def save(self, path: Path) -> None:
+        payload = {
+            "schema_version": "cogwear-late-fusion-v1",
+            "modality_names": list(self.modality_names),
+            "weights": self.weights.tolist(),
+            "fallback_probability": self.fallback_probability,
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    @classmethod
+    def load(cls, path: Path) -> "LateFusion":
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if payload.get("schema_version") != "cogwear-late-fusion-v1":
+            raise ValueError("Unsupported CogWear fusion schema.")
+        return cls(
+            modality_names=tuple(payload["modality_names"]),
+            weights=np.asarray(payload["weights"], dtype=float),
+            fallback_probability=float(payload["fallback_probability"]),
+        )
 
 
 def fit_late_fusion(
@@ -128,6 +157,9 @@ def missing_modality_scenarios(
     for name, availability in scenarios.items():
         scenario = frame[["patient_id", "condition", "target_cognitive_load"]].copy()
         scenario["scenario"] = name
-        scenario["combined_probability"] = fusion.predict(probabilities, availability)
+        scenario["combined_probability"] = fusion.predict(
+            probabilities, availability, abstain_if_all_missing=True
+        )
+        scenario["abstained"] = ~np.isfinite(scenario["combined_probability"])
         rows.append(scenario)
     return pd.concat(rows, ignore_index=True)

@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -73,6 +75,48 @@ class LogisticHead:
                 "absolute_coefficient": np.abs(self.weights),
             }
         ).sort_values("absolute_coefficient", ascending=False, ignore_index=True)
+
+    def save(self, path: Path) -> None:
+        if (
+            self.standardizer.medians is None
+            or self.standardizer.means is None
+            or self.standardizer.scales is None
+        ):
+            raise RuntimeError("Cannot save an unfitted standardizer.")
+        payload = {
+            "schema_version": "cogwear-logistic-head-v1",
+            "feature_names": list(self.feature_names),
+            "standardizer": {
+                "medians": self.standardizer.medians.tolist(),
+                "means": self.standardizer.means.tolist(),
+                "scales": self.standardizer.scales.tolist(),
+            },
+            "weights": self.weights.tolist(),
+            "bias": self.bias,
+            "best_epoch": self.best_epoch,
+            "best_validation_loss": self.best_validation_loss,
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    @classmethod
+    def load(cls, path: Path) -> "LogisticHead":
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if payload.get("schema_version") != "cogwear-logistic-head-v1":
+            raise ValueError("Unsupported CogWear head schema.")
+        values = payload["standardizer"]
+        return cls(
+            feature_names=tuple(payload["feature_names"]),
+            standardizer=TrainOnlyStandardizer(
+                medians=np.asarray(values["medians"], dtype=float),
+                means=np.asarray(values["means"], dtype=float),
+                scales=np.asarray(values["scales"], dtype=float),
+            ),
+            weights=np.asarray(payload["weights"], dtype=float),
+            bias=float(payload["bias"]),
+            best_epoch=int(payload["best_epoch"]),
+            best_validation_loss=float(payload["best_validation_loss"]),
+        )
 
 
 def fit_logistic_head(

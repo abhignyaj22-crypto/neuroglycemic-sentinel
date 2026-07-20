@@ -246,6 +246,10 @@ def run_ehr_glucose_pipeline(
         f"Selected epoch {model.best_epoch} with validation total loss "
         f"{model.best_validation_loss:.6f}."
     )
+    print(
+        "Validation-selected residual weight versus persistence: "
+        f"{model.regression_blend_weight:.2f}."
+    )
     coefficients = model.feature_coefficients()
     coefficients["max_absolute_coefficient"] = coefficients[
         [
@@ -285,7 +289,7 @@ def run_ehr_glucose_pipeline(
         comparison["model"] == "persistence_current_glucose"
     ].iloc[0]
     model_row = comparison.loc[
-        comparison["model"] == "probabilistic_multitask_ehr"
+        comparison["model"] == "validation_shrunk_multitask_ehr"
     ].iloc[0]
     metrics["mase_vs_persistence"] = float(
         model_row["patient_macro_mae_mg_dl"]
@@ -372,6 +376,7 @@ def run_ehr_glucose_pipeline(
         "serialization_round_trip": serialization_difference < 1e-10,
         "case_study_not_abstained": not response.abstained,
         "clinical_performance_gate_passed": model_beats_persistence,
+        "regression_blend_weight": model.regression_blend_weight,
         "release_recommendation": (
             "continue_research_validation"
             if model_beats_persistence
@@ -384,6 +389,7 @@ def run_ehr_glucose_pipeline(
         if key
         not in {
             "serialization_max_absolute_difference",
+            "regression_blend_weight",
             "clinical_performance_gate_passed",
             "release_recommendation",
         }

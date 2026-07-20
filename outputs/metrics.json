@@ -16,13 +16,13 @@
   "wearable": {
     "window_level": {
       "auroc": 0.9722222222222223,
-      "log_loss": 0.41450197855736093,
+      "log_loss": 0.41450197855736026,
       "accuracy": 0.8333333333333334,
       "balanced_accuracy": 0.8333333333333333
     },
     "patient_session_level": {
       "auroc": 1.0,
-      "log_loss": 0.3908802468699895,
+      "log_loss": 0.3908802468699891,
       "accuracy": 0.75,
       "balanced_accuracy": 0.75
     }
@@ -30,13 +30,13 @@
   "late_fusion": {
     "window_level": {
       "auroc": 0.9722222222222223,
-      "log_loss": 0.41450197855736093,
+      "log_loss": 0.41450197855736026,
       "accuracy": 0.8333333333333334,
       "balanced_accuracy": 0.8333333333333333
     },
     "patient_session_level": {
       "auroc": 1.0,
-      "log_loss": 0.3908802468699895,
+      "log_loss": 0.3908802468699891,
       "accuracy": 0.75,
       "balanced_accuracy": 0.75
     }
@@ -52,7 +52,7 @@
     },
     "wearable": {
       "epoch": 121,
-      "validation_loss": 0.6147129174339443
+      "validation_loss": 0.6147129174339447
     }
   },
   "split_patients": {
