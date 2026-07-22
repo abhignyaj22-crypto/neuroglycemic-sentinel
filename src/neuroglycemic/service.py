@@ -278,6 +278,16 @@ def build_neural_checkpoint_metadata(
         raise ValueError("dropout must be in [0, 1).")
     if not 0 <= modality_dropout_probability < 1:
         raise ValueError("modality_dropout_probability must be in [0, 1).")
+    architecture_extras = (
+        model.architecture_extras()
+        if hasattr(model, "architecture_extras")
+        else {
+            "cross_modal_layers": 0,
+            "cross_modal_heads": 4,
+            "horizon_film": False,
+            "response_kernel": None,
+        }
+    )
     return {
         "model_version": str(model_version),
         "model_spec": {
@@ -291,6 +301,7 @@ def build_neural_checkpoint_metadata(
                 modality_dropout_probability
             ),
             "auxiliary_task_kinds": dict(model.auxiliary_task_kinds),
+            **architecture_extras,
         },
         "feature_schema": {
             "version": str(feature_schema_version),
@@ -503,6 +514,12 @@ class NeuralGlucoseService:
                 str(name): str(kind)
                 for name, kind in dict(spec.get("auxiliary_task_kinds", {})).items()
             }
+            cross_modal_layers = int(spec.get("cross_modal_layers", 0))
+            cross_modal_heads = int(spec.get("cross_modal_heads", 4))
+            horizon_film = bool(spec.get("horizon_film", False))
+            response_kernel = spec.get("response_kernel")
+            if response_kernel is not None and not isinstance(response_kernel, dict):
+                raise ValueError("model_spec response_kernel must be a mapping or null.")
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError("Checkpoint model_spec is incomplete or invalid.") from exc
         stored_horizons = tuple(
@@ -548,6 +565,10 @@ class NeuralGlucoseService:
             min_scale=min_scale,
             modality_dropout_probability=modality_dropout_probability,
             auxiliary_task_kinds=auxiliary_task_kinds,
+            cross_modal_layers=cross_modal_layers,
+            cross_modal_heads=cross_modal_heads,
+            horizon_film=horizon_film,
+            response_kernel=response_kernel,
         )
         loaded = load_neural_checkpoint(
             Path(checkpoint_path),

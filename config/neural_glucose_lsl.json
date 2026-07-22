@@ -1,7 +1,10 @@
 {
   "schema_version": "neural-glucose-training-v1",
   "prediction_target": "future_cgm_glucose_mg_dl",
-  "forecast_horizons_minutes": [30, 60],
+  "forecast_horizons_minutes": [
+    30,
+    60
+  ],
   "target_standardization": "train_only_zscore_per_horizon",
   "seed": 42,
   "epochs": 100,
@@ -21,7 +24,27 @@
     "cross_modal_layers": 1,
     "cross_modal_heads": 4,
     "horizon_film": true,
-    "response_kernel": null
+    "response_kernel": {
+      "channels": {
+        "carbohydrate_g": 1.0,
+        "protein_g": 1.0,
+        "fat_g": 1.0,
+        "fiber_g": 1.0,
+        "bolus_insulin_units": -1.0
+      },
+      "basis_centers_minutes": [
+        0,
+        15,
+        30,
+        45,
+        60,
+        90,
+        120,
+        180
+      ],
+      "rank": 4,
+      "max_gain_deviation": 0.25
+    }
   },
   "forecast_mode": "ambient_no_cgm",
   "input_cgm": false,
@@ -59,7 +82,16 @@
   },
   "meal_context": {
     "lookback_minutes": 240,
-    "lag_centers_minutes": [0, 15, 30, 45, 60, 90, 120, 180],
+    "lag_centers_minutes": [
+      0,
+      15,
+      30,
+      45,
+      60,
+      90,
+      120,
+      180
+    ],
     "lag_width_minutes": 20,
     "value_columns": [
       "carbohydrate_g",
@@ -74,5 +106,5 @@
   "early_stopping_patience": 12,
   "minimum_delta": 0.0001,
   "device": "cpu",
-  "checkpoint_relative_path": "outputs/models/neural_glucose_best.pt"
+  "checkpoint_relative_path": "outputs/models/neural_glucose_lsl_best.pt"
 }

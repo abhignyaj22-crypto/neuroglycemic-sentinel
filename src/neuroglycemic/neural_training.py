@@ -63,17 +63,34 @@ class NeuralTrainingConfig:
     checkpoint_relative_path: str
     project_root: Path
     horizon_tolerance_minutes: float = 5.0
+    crps_loss_weight: float = 0.0
+    lr_warmup_epochs: int = 0
+    lr_min_ratio: float = 1.0
+    ema_decay: float = 0.0
 
     @property
     def checkpoint_path(self) -> Path:
         return self.project_root / self.checkpoint_relative_path
 
     def checkpoint_values(self) -> dict[str, Any]:
-        """Return serializable settings without a machine-specific root path."""
+        """Return serializable settings without a machine-specific root path.
+
+        Settings introduced after the original v5 contract are omitted when
+        they hold their defaults, so checkpoints trained before those knobs
+        existed still compare equal during reproducibility checks.
+        """
 
         values = asdict(self)
         values.pop("project_root")
         values["forecast_horizons_minutes"] = list(self.forecast_horizons_minutes)
+        for name, default in (
+            ("crps_loss_weight", 0.0),
+            ("lr_warmup_epochs", 0),
+            ("lr_min_ratio", 1.0),
+            ("ema_decay", 0.0),
+        ):
+            if values.get(name) == default:
+                values.pop(name)
         return values
 
 
@@ -276,6 +293,10 @@ def load_neural_training_config(path: Path) -> NeuralTrainingConfig:
         checkpoint_relative_path=str(values["checkpoint_relative_path"]),
         project_root=path.parent.parent,
         horizon_tolerance_minutes=float(values.get("horizon_tolerance_minutes", 5.0)),
+        crps_loss_weight=float(values.get("crps_loss_weight", 0.0)),
+        lr_warmup_epochs=int(values.get("lr_warmup_epochs", 0)),
+        lr_min_ratio=float(values.get("lr_min_ratio", 1.0)),
+        ema_decay=float(values.get("ema_decay", 0.0)),
     )
     _validate_config(config)
     return config
@@ -331,6 +352,49 @@ def _validate_config(config: NeuralTrainingConfig) -> None:
         or not 0 <= modality_dropout_probability < 1
     ):
         raise ValueError("model modality_dropout_probability must be in [0, 1).")
+    cross_modal_layers = int(config.model.get("cross_modal_layers", 0))
+    cross_modal_heads = int(config.model.get("cross_modal_heads", 4))
+    horizon_film = config.model.get("horizon_film", False)
+    if cross_modal_layers < 0 or cross_modal_heads <= 0:
+        raise ValueError("model cross_modal_layers must be >= 0 and heads positive.")
+    if cross_modal_layers > 0 and embedding_dim % cross_modal_heads != 0:
+        raise ValueError("embedding_dim must be divisible by cross_modal_heads.")
+    if not isinstance(horizon_film, bool):
+        raise ValueError("model horizon_film must be a boolean.")
+    response_kernel = config.model.get("response_kernel")
+    if response_kernel is not None:
+        if not isinstance(response_kernel, dict):
+            raise ValueError("model response_kernel must be a mapping.")
+        channels = response_kernel.get("channels")
+        centers = response_kernel.get("basis_centers_minutes")
+        if not isinstance(channels, dict) or not channels:
+            raise ValueError("response_kernel requires a non-empty channels mapping.")
+        if any(float(sign) not in (-1.0, 1.0) for sign in channels.values()):
+            raise ValueError("response_kernel channel signs must be +1.0 or -1.0.")
+        if (
+            not isinstance(centers, list)
+            or not centers
+            or any(float(value) < 0 for value in centers)
+        ):
+            raise ValueError("response_kernel basis_centers_minutes must be non-negative.")
+        if int(response_kernel.get("patient_count", 0)) < 0:
+            raise ValueError("response_kernel patient_count must be non-negative.")
+        if int(response_kernel.get("rank", 4)) <= 0:
+            raise ValueError("response_kernel rank must be positive.")
+        deviation = float(response_kernel.get("max_gain_deviation", 0.25))
+        if not math.isfinite(deviation) or not 0 < deviation < 1:
+            raise ValueError("response_kernel max_gain_deviation must be in (0, 1).")
+    if not math.isfinite(config.crps_loss_weight) or config.crps_loss_weight < 0:
+        raise ValueError("crps_loss_weight must be finite and non-negative.")
+    if config.lr_warmup_epochs < 0:
+        raise ValueError("lr_warmup_epochs must be non-negative.")
+    if (
+        not math.isfinite(config.lr_min_ratio)
+        or not 0 < config.lr_min_ratio <= 1
+    ):
+        raise ValueError("lr_min_ratio must be in (0, 1].")
+    if not math.isfinite(config.ema_decay) or not 0 <= config.ema_decay < 1:
+        raise ValueError("ema_decay must be in [0, 1). 0 disables EMA.")
     if config.forecast_mode not in {
         "ambient_no_cgm",
         "announced_meal_no_cgm",
@@ -470,11 +534,14 @@ def make_neuroglycemic_loss_step(
     expert_loss_weight: float,
     target_standardizer: GlucoseTargetStandardizer,
     auxiliary_tasks: Mapping[str, Mapping[str, Any]] | None = None,
+    crps_loss_weight: float = 0.0,
 ) -> LossStep:
     """Adapt the neural model API and standardize raw mg/dL labels safely."""
 
     if not math.isfinite(expert_loss_weight) or expert_loss_weight < 0:
         raise ValueError("expert_loss_weight must be finite and non-negative.")
+    if not math.isfinite(crps_loss_weight) or crps_loss_weight < 0:
+        raise ValueError("crps_loss_weight must be finite and non-negative.")
 
     def loss_step(model: nn.Module, batch: Batch) -> LossOutput:
         from .neural_model import neuroglycemic_loss
@@ -497,6 +564,9 @@ def make_neuroglycemic_loss_step(
             quality=batch["quality"],
             staleness=batch["staleness"],
             clock_uncertainty=batch.get("clock_uncertainty"),
+            patient_index=batch.get("patient_index"),
+            seen_patient=batch.get("seen_patient"),
+            event_basis=batch.get("event_basis"),
         )
         values = neuroglycemic_loss(
             outputs,
@@ -504,6 +574,7 @@ def make_neuroglycemic_loss_step(
             target_mask=batch.get("target_mask"),
             sample_weight=batch.get("sample_weight"),
             expert_loss_weight=expert_loss_weight,
+            crps_loss_weight=crps_loss_weight,
             auxiliary_targets=batch.get("auxiliary_targets"),
             auxiliary_masks=batch.get("auxiliary_masks"),
             auxiliary_task_kinds={
@@ -559,6 +630,7 @@ def _run_epoch(
     device: torch.device,
     optimizer: torch.optim.Optimizer | None,
     gradient_clip_norm: float,
+    step_callback: Callable[[], None] | None = None,
 ) -> dict[str, float]:
     training = optimizer is not None
     model.train(training)
@@ -595,6 +667,8 @@ def _run_epoch(
                 )
                 gradient_norm_sum += _finite_scalar(gradient_norm, name="gradient norm")
                 optimizer.step()
+                if step_callback is not None:
+                    step_callback()
 
             total_examples += examples
             total_objective_weight += objective_weight
@@ -707,6 +781,85 @@ def load_neural_checkpoint(
     return payload
 
 
+def _param_groups(model: nn.Module, weight_decay: float) -> list[dict[str, Any]]:
+    """AdamW groups: no weight decay on biases and 1-D (norm) parameters."""
+
+    decay, no_decay = [], []
+    for parameter in model.parameters():
+        if not parameter.requires_grad:
+            continue
+        (decay if parameter.ndim > 1 else no_decay).append(parameter)
+    groups = []
+    if decay:
+        groups.append({"params": decay, "weight_decay": weight_decay})
+    if no_decay:
+        groups.append({"params": no_decay, "weight_decay": 0.0})
+    return groups
+
+
+class _ExponentialMovingAverage:
+    """Shadow parameters evaluated and checkpointed instead of the raw ones.
+
+    EMA of weights is a variance-reduction technique that reliably improves
+    held-out performance for small, noisy clinical datasets.  It is disabled
+    when ``ema_decay`` is 0, which reproduces the legacy training behavior
+    exactly.
+    """
+
+    def __init__(self, model: nn.Module, decay: float) -> None:
+        if not 0 < decay < 1:
+            raise ValueError("EMA decay must be in (0, 1).")
+        self.decay = float(decay)
+        self.shadow = {
+            name: value.detach().clone()
+            for name, value in model.state_dict().items()
+        }
+
+    @torch.no_grad()
+    def update(self, model: nn.Module) -> None:
+        for name, value in model.state_dict().items():
+            target = self.shadow[name]
+            if value.dtype.is_floating_point:
+                target.mul_(self.decay).add_(value.detach(), alpha=1.0 - self.decay)
+            else:
+                target.copy_(value.detach())
+
+    def copy_to(self, model: nn.Module) -> dict[str, Tensor]:
+        """Load the shadow weights into the model; return the displaced state."""
+
+        displaced = {
+            name: value.detach().clone()
+            for name, value in model.state_dict().items()
+        }
+        model.load_state_dict(self.shadow)
+        return displaced
+
+    def restore(self, model: nn.Module, displaced: Mapping[str, Tensor]) -> None:
+        model.load_state_dict(displaced)
+
+
+def _make_lr_scheduler(
+    optimizer: torch.optim.Optimizer, config: NeuralTrainingConfig
+) -> torch.optim.lr_scheduler.LambdaLR | None:
+    """Linear warmup followed by cosine decay; None keeps the legacy fixed LR."""
+
+    if config.lr_warmup_epochs == 0 and config.lr_min_ratio >= 1.0:
+        return None
+    warmup = max(int(config.lr_warmup_epochs), 0)
+    min_ratio = float(config.lr_min_ratio)
+    total = max(int(config.epochs), warmup + 1)
+
+    def factor(epoch_index: int) -> float:
+        # ``epoch_index`` counts completed epochs starting at 0.
+        step = epoch_index + 1
+        if warmup and step <= warmup:
+            return step / warmup
+        progress = (step - warmup) / max(total - warmup, 1)
+        return min_ratio + (1.0 - min_ratio) * 0.5 * (1.0 + math.cos(math.pi * progress))
+
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, factor)
+
+
 def train_with_early_stopping(
     model: nn.Module,
     train_batches: Iterable[Batch],
@@ -723,6 +876,10 @@ def train_with_early_stopping(
     Unlike the legacy linear loop, an untrained epoch-0 initialization is never
     serialized as a trained model.  If the first optimizer step is invalid, the
     run fails instead of silently returning all-zero parameters.
+
+    When ``ema_decay`` is enabled, validation selection and the serialized
+    ``model_state_dict`` use the EMA shadow weights while the optimizer state
+    continues to track the raw parameters.
     """
 
     _validate_config(config)
@@ -735,9 +892,15 @@ def train_with_early_stopping(
     if not parameters:
         raise ValueError("The model has no trainable parameters.")
     optimizer = torch.optim.AdamW(
-        parameters,
+        _param_groups(model, config.weight_decay),
         lr=config.learning_rate,
         weight_decay=config.weight_decay,
+    )
+    scheduler = _make_lr_scheduler(optimizer, config)
+    ema = (
+        _ExponentialMovingAverage(model, config.ema_decay)
+        if config.ema_decay > 0
+        else None
     )
     destination = checkpoint_path or config.checkpoint_path
     train_batch_values = list(train_batches)
@@ -767,40 +930,52 @@ def train_with_early_stopping(
             device=device,
             optimizer=optimizer,
             gradient_clip_norm=config.gradient_clip_norm,
+            step_callback=(lambda: ema.update(model)) if ema is not None else None,
         )
-        validation_values = _run_epoch(
-            model,
-            validation_batch_values,
-            loss_step,
-            device=device,
-            optimizer=None,
-            gradient_clip_norm=config.gradient_clip_norm,
-        )
-        row: dict[str, float | int] = {
-            "epoch": epoch,
-            **{f"train_{name}": value for name, value in train_values.items()},
-            **{f"validation_{name}": value for name, value in validation_values.items()},
-        }
-        history.append(row)
-        validation_loss = validation_values["loss"]
-        if validation_loss < best_loss - config.minimum_delta:
-            best_loss = validation_loss
-            best_epoch = epoch
-            epochs_without_improvement = 0
-            save_neural_checkpoint(
-                destination,
+        if scheduler is not None:
+            scheduler.step()
+        # Validation and checkpoint selection run on the EMA shadow weights
+        # when enabled; the raw parameters are restored immediately after.
+        displaced = ema.copy_to(model) if ema is not None else None
+        try:
+            validation_values = _run_epoch(
                 model,
-                optimizer,
-                epoch=epoch,
-                validation_loss=validation_loss,
-                config=config,
-                target_standardizer=target_standardizer,
-                metadata=checkpoint_metadata,
+                validation_batch_values,
+                loss_step,
+                device=device,
+                optimizer=None,
+                gradient_clip_norm=config.gradient_clip_norm,
             )
-        else:
-            epochs_without_improvement += 1
-            if epochs_without_improvement >= config.early_stopping_patience:
-                break
+            row: dict[str, float | int] = {
+                "epoch": epoch,
+                **{f"train_{name}": value for name, value in train_values.items()},
+                **{f"validation_{name}": value for name, value in validation_values.items()},
+            }
+            if scheduler is not None:
+                row["learning_rate"] = float(scheduler.get_last_lr()[0])
+            history.append(row)
+            validation_loss = validation_values["loss"]
+            if validation_loss < best_loss - config.minimum_delta:
+                best_loss = validation_loss
+                best_epoch = epoch
+                epochs_without_improvement = 0
+                save_neural_checkpoint(
+                    destination,
+                    model,
+                    optimizer,
+                    epoch=epoch,
+                    validation_loss=validation_loss,
+                    config=config,
+                    target_standardizer=target_standardizer,
+                    metadata=checkpoint_metadata,
+                )
+            else:
+                epochs_without_improvement += 1
+        finally:
+            if ema is not None and displaced is not None:
+                ema.restore(model, displaced)
+        if epochs_without_improvement >= config.early_stopping_patience:
+            break
 
     if best_epoch == 0 or not destination.exists():
         raise RuntimeError(

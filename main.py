@@ -582,6 +582,10 @@ def _neural_model_from_spec(spec: dict[str, object]):
             str(name): str(kind)
             for name, kind in dict(spec.get("auxiliary_task_kinds", {})).items()
         },
+        cross_modal_layers=int(spec.get("cross_modal_layers", 0)),
+        cross_modal_heads=int(spec.get("cross_modal_heads", 4)),
+        horizon_film=bool(spec.get("horizon_film", False)),
+        response_kernel=spec.get("response_kernel"),
     )
 
 
@@ -594,6 +598,9 @@ def run_neural_train(
     batch_size: int,
     train_fraction: float,
     validation_fraction: float,
+    pretrain_epochs: int = 0,
+    pretrain_checkpoint: Path | None = None,
+    init_from_pretrain: Path | None = None,
 ) -> dict[str, object]:
     """Fit the neural model on one real, pre-aligned patient-level table."""
 
@@ -621,6 +628,21 @@ def run_neural_train(
     from src.neuroglycemic.service import build_neural_checkpoint_metadata
 
     config = load_neural_training_config(config_path)
+    # ``optimization_seed`` (optional, ensemble training) reseeds model
+    # initialization and batch shuffling while the patient split stays keyed to
+    # the config seed, so ensemble members share one identical split.
+    raw_config_values = json.loads(config_path.read_text(encoding="utf-8"))
+    optimization_seed = int(raw_config_values.get("optimization_seed", config.seed))
+    split_seed = config.seed
+    if optimization_seed != config.seed:
+        from dataclasses import replace as _replace_config
+
+        config = _replace_config(config, seed=optimization_seed)
+    # Optional anchor thinning: decorrelates near-duplicate windows from
+    # densely anchored datasets (for example 15-minute Big IDEAS anchors).
+    min_anchor_spacing = raw_config_values.get("min_anchor_spacing_minutes")
+    if min_anchor_spacing is not None:
+        min_anchor_spacing = float(min_anchor_spacing)
     modalities = tuple(config.feature_registry) or None
     frame, feature_names = load_aligned_window_frame(
         data_path,
@@ -637,7 +659,7 @@ def run_neural_train(
     )
     split_frame, split = patient_grouped_split(
         frame,
-        seed=config.seed,
+        seed=split_seed,
         train_fraction=train_fraction,
         validation_fraction=validation_fraction,
     )
@@ -678,6 +700,36 @@ def run_neural_train(
     print("\nTRAIN-ONLY TARGET STANDARDIZATION")
     print(json.dumps(target_standardizer.as_dict(), indent=2))
 
+    # Contribution 4: sign-constrained learned event response kernel.  The
+    # kernel consumes the raw (unstandardized) causal meal/event lag basis;
+    # patient personalization is keyed by the training participants only.
+    kernel_spec = config.model.get("response_kernel")
+    event_basis_columns: dict[str, tuple[str, ...]] | None = None
+    patient_to_index: dict[str, int] | None = None
+    if kernel_spec is not None:
+        kernel_spec = dict(kernel_spec)
+        centers = tuple(
+            f"{float(value):g}"
+            for value in kernel_spec["basis_centers_minutes"]
+        )
+        event_basis_columns = {}
+        for channel in kernel_spec["channels"]:
+            columns = tuple(f"meal_lag_{channel}_{center}m" for center in centers)
+            missing = set(columns) - set(frame.columns)
+            if missing:
+                raise ValueError(
+                    f"response_kernel channel {channel!r} requires aligned event "
+                    f"basis columns {sorted(missing)}. Build them with the causal "
+                    "meal-context feature builder or disable response_kernel."
+                )
+            event_basis_columns[str(channel)] = columns
+        train_participants = sorted(
+            train["participant_key"].astype(str).unique().tolist()
+        )
+        patient_to_index = {
+            key: index for index, key in enumerate(train_participants)
+        }
+        kernel_spec["patient_count"] = len(patient_to_index)
     train_batches = make_neural_batches(
         train,
         feature_standardizer,
@@ -686,6 +738,9 @@ def run_neural_train(
         auxiliary_tasks=config.auxiliary_tasks,
         shuffle=True,
         seed=config.seed,
+        patient_to_index=patient_to_index,
+        event_basis_columns=event_basis_columns,
+        min_anchor_spacing_minutes=min_anchor_spacing,
     )
     validation_batches = make_neural_batches(
         validation,
@@ -693,6 +748,9 @@ def run_neural_train(
         config.forecast_horizons_minutes,
         batch_size=batch_size,
         auxiliary_tasks=config.auxiliary_tasks,
+        patient_to_index=patient_to_index,
+        event_basis_columns=event_basis_columns,
+        min_anchor_spacing_minutes=min_anchor_spacing,
     )
     test_batches = make_neural_batches(
         test,
@@ -700,6 +758,9 @@ def run_neural_train(
         config.forecast_horizons_minutes,
         batch_size=batch_size,
         auxiliary_tasks=config.auxiliary_tasks,
+        patient_to_index=patient_to_index,
+        event_basis_columns=event_basis_columns,
+        min_anchor_spacing_minutes=min_anchor_spacing,
     )
     hidden_dim = int(config.model["hidden_dim"])
     embedding_dim = int(config.model["embedding_dim"])
@@ -723,11 +784,62 @@ def run_neural_train(
             name: str(specification["kind"])
             for name, specification in config.auxiliary_tasks.items()
         },
+        cross_modal_layers=int(config.model.get("cross_modal_layers", 0)),
+        cross_modal_heads=int(config.model.get("cross_modal_heads", 4)),
+        horizon_film=bool(config.model.get("horizon_film", False)),
+        response_kernel=kernel_spec,
+        build_reconstruction_heads=pretrain_epochs > 0,
     )
+    pretrain_provenance: dict[str, object] = {}
+    if init_from_pretrain is not None:
+        from src.neuroglycemic.pretrain import load_pretrain_weights
+
+        load_pretrain_weights(model, init_from_pretrain)
+        pretrain_provenance["initialized_from_pretrain"] = str(init_from_pretrain)
+        print(f"Initialized encoders from pretraining checkpoint: {init_from_pretrain}")
+    if pretrain_epochs > 0:
+        # Contribution 2: self-supervised masked-reconstruction pretraining on
+        # the training patients only.  Glucose targets are never read here.
+        from src.neuroglycemic.pretrain import (
+            pretrain_history_metadata,
+            pretrain_masked_reconstruction,
+            save_pretrain_checkpoint,
+        )
+
+        print(
+            f"\nSELF-SUPERVISED PRETRAINING: epochs={pretrain_epochs}, "
+            "objective=masked feature reconstruction (labels unused)"
+        )
+        pretrain_history = pretrain_masked_reconstruction(
+            model,
+            train_batches,
+            epochs=pretrain_epochs,
+            learning_rate=config.learning_rate,
+            device=config.device,
+            seed=config.seed,
+        )
+        pretrain_provenance.update(pretrain_history_metadata(pretrain_history))
+        print(pd.DataFrame(pretrain_history).to_string(index=False))
+        if pretrain_checkpoint is not None:
+            save_pretrain_checkpoint(
+                pretrain_checkpoint,
+                model,
+                metadata={
+                    "feature_names": {
+                        name: list(values)
+                        for name, values in feature_standardizer.feature_names.items()
+                    },
+                    "horizons_minutes": list(config.forecast_horizons_minutes),
+                },
+            )
+            print(f"Saved pretraining checkpoint to: {pretrain_checkpoint}")
+        # Forecasting checkpoints never carry reconstruction decoders.
+        model.drop_reconstruction_heads()
     loss_step = make_neuroglycemic_loss_step(
         config.expert_loss_weight,
         target_standardizer,
         config.auxiliary_tasks,
+        crps_loss_weight=config.crps_loss_weight,
     )
     destination = checkpoint_path or config.checkpoint_path
     source_digest = data_sha256(data_path)
@@ -788,7 +900,15 @@ def run_neural_train(
         "data_sha256": source_digest,
         "data_file_name": data_path.name,
         "alignment_contract": "same_patient_same_cohort_same_anchor",
+        "min_anchor_spacing_minutes": min_anchor_spacing,
+        **pretrain_provenance,
     }
+    if patient_to_index is not None:
+        checkpoint_metadata["patient_index_map"] = dict(patient_to_index)
+        checkpoint_metadata["event_basis_channels"] = {
+            channel: list(columns)
+            for channel, columns in (event_basis_columns or {}).items()
+        }
     print(
         "\nTRAIN NEURAL MIXTURE-OF-EXPERTS: "
         f"parameters={sum(parameter.numel() for parameter in model.parameters())}, "
@@ -817,6 +937,33 @@ def run_neural_train(
         f"\nSelected neural checkpoint: epoch={result.best_epoch}, "
         f"validation_loss={result.best_validation_loss:.6f}, path={result.checkpoint_path}"
     )
+    # Contribution 5 (reliability): split-conformal interval calibration on the
+    # validation split only, per horizon and per availability pattern.  The
+    # corrected levels are merged into the checkpoint metadata so serving and
+    # evaluation apply exactly the training-time calibration contract.
+    from src.neuroglycemic.calibration import fit_conformal_calibrator
+
+    calibrator = fit_conformal_calibrator(
+        model,
+        validation_batches,
+        target_standardizer,
+        config.forecast_horizons_minutes,
+    )
+    print("\nVALIDATION-ONLY CONFORMAL CALIBRATION")
+    print(json.dumps(calibrator.as_dict(), indent=2))
+    payload = _load_checkpoint_payload(result.checkpoint_path)
+    payload_metadata = dict(payload.get("metadata") or {})
+    payload_metadata["conformal_calibration"] = calibrator.as_dict()
+    payload["metadata"] = payload_metadata
+    temporary = result.checkpoint_path.with_suffix(
+        result.checkpoint_path.suffix + ".tmp"
+    )
+    try:
+        torch.save(payload, temporary)
+        os.replace(temporary, result.checkpoint_path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
     predictions = predict_neural_batches(
         model,
         test_batches,
@@ -828,6 +975,7 @@ def run_neural_train(
         hyperglycemia_threshold_mg_dl=config.risk_thresholds_mg_dl[
             "hyperglycemia"
         ],
+        calibrator=calibrator,
     )
     metrics = glucose_forecast_metrics(predictions)
     parameter_delta_l2 = float(
@@ -951,6 +1099,7 @@ def run_neural_train(
         hyperglycemia_threshold_mg_dl=config.risk_thresholds_mg_dl[
             "hyperglycemia"
         ],
+        calibrator=calibrator,
     )
     ablation = modality_ablation_table(ablation_scenarios)
     print_frame("HELD-OUT PATIENT NEURAL GLUCOSE PREDICTIONS", predictions)
@@ -1119,12 +1268,39 @@ def run_neural_evaluate(
     frame = attach_recorded_split(frame, patient_split)
     test = frame.loc[frame["split"] == "test"].copy()
     print_frame("CHECKPOINT-MATCHED ALIGNED EVALUATION WINDOWS", test)
+    # Restore the response-kernel batch contract when the checkpoint learned
+    # one; held-out patients are correctly marked unseen by the recorded map.
+    patient_to_index = None
+    if isinstance(metadata.get("patient_index_map"), dict):
+        patient_to_index = {
+            str(key): int(value)
+            for key, value in metadata["patient_index_map"].items()
+        }
+    event_basis_columns = None
+    if isinstance(metadata.get("event_basis_channels"), dict):
+        event_basis_columns = {
+            str(channel): tuple(str(column) for column in columns)
+            for channel, columns in metadata["event_basis_channels"].items()
+        }
+    calibrator = None
+    if isinstance(metadata.get("conformal_calibration"), dict):
+        from src.neuroglycemic.calibration import ConformalCalibrator
+
+        calibrator = ConformalCalibrator.from_dict(metadata["conformal_calibration"])
+    # Mirror the training-time anchor thinning recorded in the checkpoint so
+    # held-out metrics are computed on the same window contract.
+    min_anchor_spacing = metadata.get("min_anchor_spacing_minutes")
+    if min_anchor_spacing is not None:
+        min_anchor_spacing = float(min_anchor_spacing)
     batches = make_neural_batches(
         test,
         feature_standardizer,
         config.forecast_horizons_minutes,
         batch_size=batch_size,
         auxiliary_tasks=config.auxiliary_tasks,
+        patient_to_index=patient_to_index,
+        event_basis_columns=event_basis_columns,
+        min_anchor_spacing_minutes=min_anchor_spacing,
     )
     predictions = predict_neural_batches(
         model,
@@ -1137,6 +1313,7 @@ def run_neural_evaluate(
         hyperglycemia_threshold_mg_dl=config.risk_thresholds_mg_dl[
             "hyperglycemia"
         ],
+        calibrator=calibrator,
     )
     metrics = glucose_forecast_metrics(predictions)
     ablation_scenarios = modality_ablation_predictions(
@@ -1377,6 +1554,32 @@ def cli() -> None:
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--train-fraction", type=float, default=0.70)
     parser.add_argument("--validation-fraction", type=float, default=0.15)
+    parser.add_argument(
+        "--pretrain-epochs",
+        type=int,
+        default=0,
+        help="Self-supervised masked-reconstruction epochs before fine-tuning.",
+    )
+    parser.add_argument(
+        "--pretrain-checkpoint",
+        type=Path,
+        default=None,
+        help="Optional path to save the self-supervised pretraining weights.",
+    )
+    parser.add_argument(
+        "--horizons-minutes",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Forecast horizons for cohort builders that support them "
+        "(for example: --horizons-minutes 30 60 90 120).",
+    )
+    parser.add_argument(
+        "--init-from-pretrain",
+        type=Path,
+        default=None,
+        help="Initialize encoders from a saved pretraining checkpoint.",
+    )
     arguments = parser.parse_args()
 
     if arguments.study is None:
@@ -1557,6 +1760,11 @@ def cli() -> None:
         build_config = BigIdeasBuildConfig(
             source_timezone=arguments.source_timezone,
             clock_uncertainty_ms=arguments.clock_uncertainty_ms,
+            horizons_minutes=(
+                tuple(int(value) for value in arguments.horizons_minutes)
+                if arguments.horizons_minutes
+                else (30, 60)
+            ),
         )
         windows, audit = build_big_ideas_dataset(
             discover_big_ideas_patients(source_root), config=build_config
@@ -1822,6 +2030,9 @@ def cli() -> None:
                 batch_size=arguments.batch_size,
                 train_fraction=arguments.train_fraction,
                 validation_fraction=arguments.validation_fraction,
+                pretrain_epochs=arguments.pretrain_epochs,
+                pretrain_checkpoint=arguments.pretrain_checkpoint,
+                init_from_pretrain=arguments.init_from_pretrain,
             )
         else:
             run_neural_evaluate(

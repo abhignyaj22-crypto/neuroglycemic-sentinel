@@ -42,6 +42,11 @@ class BigIdeasBuildConfig:
     target_tolerance_minutes: float = 5.0
     minimum_hr_minutes: int = 12
     clock_uncertainty_ms: float = 60_000.0
+    emit_meal_lag_basis: bool = True
+    meal_lag_centers_minutes: tuple[float, ...] = (
+        0.0, 15.0, 30.0, 45.0, 60.0, 90.0, 120.0, 180.0
+    )
+    meal_lag_width_minutes: float = 20.0
 
     def __post_init__(self) -> None:
         if not self.source_timezone.strip():
@@ -58,6 +63,17 @@ class BigIdeasBuildConfig:
             raise ValueError("minimum_hr_minutes must be positive.")
         if not math.isfinite(self.clock_uncertainty_ms) or self.clock_uncertainty_ms < 0:
             raise ValueError("clock_uncertainty_ms must be finite and non-negative.")
+        if self.emit_meal_lag_basis:
+            if not self.meal_lag_centers_minutes or any(
+                not math.isfinite(value) or value < 0
+                for value in self.meal_lag_centers_minutes
+            ):
+                raise ValueError("Meal-lag centers must be finite and non-negative.")
+            if (
+                not math.isfinite(self.meal_lag_width_minutes)
+                or self.meal_lag_width_minutes <= 0
+            ):
+                raise ValueError("meal_lag_width_minutes must be finite and positive.")
 
 
 @dataclass(frozen=True)
@@ -222,6 +238,67 @@ def _nearest(
     return float(frame.iloc[index]["glucose_mg_dl"]), observed_time
 
 
+def _attach_meal_lag_basis(
+    frame: pd.DataFrame,
+    meals: pd.DataFrame,
+    patient_id: str,
+    config: BigIdeasBuildConfig,
+) -> pd.DataFrame:
+    """Attach the causal carbohydrate lag basis consumed by the response kernel.
+
+    The columns (``meal_lag_carbohydrate_g_<center>m``) are raw, amount-weighted
+    radial-basis values over event age — the same contract the LSL window
+    builder emits — so the learned response kernel (contribution 4) can engage
+    on Big IDEAS without any training-side changes.  They are *not* registry
+    features and never enter the encoder inputs.
+
+    Logging caveat: Big IDEAS food logs carry only ``time_begin``, so the event
+    time doubles as the availability time.  This assumes meals were logged
+    when eaten; a retrospective logging habit would soften, not fabricate, the
+    learned kernel.
+    """
+
+    if not config.emit_meal_lag_basis or frame.empty:
+        return frame
+    from .meal_context import MealLagSpec, build_causal_meal_lag_features
+
+    spec = MealLagSpec(
+        centers_minutes=tuple(config.meal_lag_centers_minutes),
+        width_minutes=float(config.meal_lag_width_minutes),
+        lookback_minutes=240.0,
+        value_columns=("carbohydrate_g",),
+    )
+    events = pd.DataFrame(
+        {
+            "patient_id": pd.Series([], dtype=str),
+            "event_time": pd.Series([], dtype="datetime64[ns, UTC]"),
+            "available_time": pd.Series([], dtype="datetime64[ns, UTC]"),
+            "carbohydrate_g": pd.Series([], dtype=float),
+        }
+    )
+    if not meals.empty:
+        events = pd.DataFrame(
+            {
+                "patient_id": patient_id,
+                "event_time": meals["time"],
+                "available_time": meals["time"],
+                "carbohydrate_g": meals["total_carb"],
+            }
+        )
+    lag = build_causal_meal_lag_features(
+        frame[["patient_id", "anchor_time"]].copy(), events, spec=spec
+    )
+    lag_columns = [column for column in lag.columns if column.startswith("meal_lag_")]
+    merged = frame.merge(
+        lag[["patient_id", "anchor_time", *lag_columns]],
+        on=["patient_id", "anchor_time"],
+        how="left",
+        validate="one_to_one",
+    )
+    merged[lag_columns] = merged[lag_columns].fillna(0.0)
+    return merged
+
+
 def build_big_ideas_patient_windows(
     files: BigIdeasPatientFiles, *, config: BigIdeasBuildConfig
 ) -> tuple[pd.DataFrame, BigIdeasPatientAudit]:
@@ -324,6 +401,7 @@ def build_big_ideas_patient_windows(
         if target_count:
             rows.append(row)
     frame = pd.DataFrame(rows)
+    frame = _attach_meal_lag_basis(frame, meals, files.patient_id, config)
     audit = BigIdeasPatientAudit(
         patient_id=files.patient_id,
         cgm_rows=len(cgm),

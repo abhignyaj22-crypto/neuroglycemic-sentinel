@@ -487,6 +487,40 @@ class TrainOnlyFeatureStandardizer:
         )
 
 
+def _thin_anchor_spacing(
+    frame: pd.DataFrame, min_spacing_minutes: float
+) -> pd.DataFrame:
+    """Greedily keep per-patient anchors at least ``min_spacing_minutes`` apart.
+
+    Datasets anchored every 15 minutes (Big IDEAS) produce near-duplicate
+    windows whose targets are heavily autocorrelated; without thinning, the
+    model effectively sees the same episode many times per epoch, which
+    inflates apparent sample size and biases early stopping.  Thinning is
+    deterministic (earliest anchor kept first) so train/validation/test rows
+    remain reproducible, and it never mixes patients.
+    """
+
+    required = {"patient_id", "cohort_id", "anchor_time"}
+    missing = required - set(frame.columns)
+    if missing:
+        raise ValueError(f"Anchor thinning requires columns: {sorted(missing)}")
+    keep_indices: list[int] = []
+    spacing = pd.Timedelta(minutes=float(min_spacing_minutes))
+    working = frame[["patient_id", "cohort_id", "anchor_time"]].copy()
+    working["original_row_index"] = np.arange(len(working))
+    grouped = working.sort_values("anchor_time").groupby(
+        ["patient_id", "cohort_id"], sort=False
+    )
+    for _, group in grouped:
+        last_kept: pd.Timestamp | None = None
+        for row in group.itertuples():
+            anchor = pd.Timestamp(row.anchor_time)
+            if last_kept is None or anchor - last_kept >= spacing:
+                keep_indices.append(int(row.original_row_index))
+                last_kept = anchor
+    return frame.iloc[sorted(keep_indices)].reset_index(drop=True)
+
+
 def make_neural_batches(
     frame: pd.DataFrame,
     standardizer: TrainOnlyFeatureStandardizer,
@@ -496,10 +530,32 @@ def make_neural_batches(
     shuffle: bool = False,
     seed: int = 0,
     auxiliary_tasks: Mapping[str, Mapping[str, Any]] | None = None,
+    patient_to_index: Mapping[str, int] | None = None,
+    event_basis_columns: Mapping[str, Sequence[str]] | None = None,
+    min_anchor_spacing_minutes: float | None = None,
 ) -> list[dict[str, Any]]:
     if batch_size <= 0:
         raise ValueError("batch_size must be positive.")
+    if min_anchor_spacing_minutes is not None and (
+        not math.isfinite(min_anchor_spacing_minutes)
+        or min_anchor_spacing_minutes <= 0
+    ):
+        raise ValueError("min_anchor_spacing_minutes must be positive when set.")
+    if patient_to_index is not None:
+        if any(int(value) < 0 for value in patient_to_index.values()):
+            raise ValueError("patient_to_index values must be non-negative.")
+    if event_basis_columns is not None:
+        for channel, columns in event_basis_columns.items():
+            if not columns:
+                raise ValueError(f"Event channel {channel!r} has no basis columns.")
+            missing = set(columns) - set(frame.columns)
+            if missing:
+                raise ValueError(
+                    f"Event channel {channel!r} is missing basis columns: {sorted(missing)}"
+                )
     ordered = frame.reset_index(drop=True)
+    if min_anchor_spacing_minutes is not None:
+        ordered = _thin_anchor_spacing(ordered, min_anchor_spacing_minutes)
     if shuffle:
         order = np.random.default_rng(seed).permutation(len(ordered))
         ordered = ordered.iloc[order].reset_index(drop=True)
@@ -574,6 +630,30 @@ def make_neural_batches(
         ).to_numpy(float).tolist(),
         dtype=torch.float32,
     )
+    patient_index_tensor: Tensor | None = None
+    seen_patient_tensor: Tensor | None = None
+    if patient_to_index is not None:
+        raw_index = participant_keys.map(
+            lambda key: patient_to_index.get(str(key), -1)
+        ).astype(int)
+        seen_patient_tensor = torch.tensor(
+            (raw_index >= 0).to_numpy(bool).tolist(), dtype=torch.bool
+        )
+        patient_index_tensor = torch.tensor(
+            raw_index.clip(lower=0).to_numpy(int).tolist(), dtype=torch.long
+        )
+    event_basis_tensors: dict[str, Tensor] = {}
+    for channel, columns in (event_basis_columns or {}).items():
+        raw_values = (
+            ordered[list(columns)]
+            .apply(pd.to_numeric, errors="coerce")
+            .fillna(0.0)
+            .clip(lower=0.0)
+            .to_numpy(float)
+        )
+        event_basis_tensors[str(channel)] = torch.tensor(
+            raw_values.tolist(), dtype=torch.float32
+        )
     auxiliary_targets: dict[str, Tensor] = {}
     auxiliary_masks: dict[str, Tensor] = {}
     for task_name, specification in (auxiliary_tasks or {}).items():
@@ -592,8 +672,7 @@ def make_neural_batches(
     batches: list[dict[str, Any]] = []
     for start in range(0, len(ordered), batch_size):
         stop = min(start + batch_size, len(ordered))
-        batches.append(
-            {
+        batch: dict[str, Any] = {
                 "features": {name: value[start:stop] for name, value in full_features.items()},
                 "feature_masks": {name: value[start:stop] for name, value in full_masks.items()},
                 "availability": availability[start:stop],
@@ -617,7 +696,15 @@ def make_neural_batches(
                 "participant_keys": participant_keys.iloc[start:stop].tolist(),
                 "anchor_times": [value.isoformat() for value in ordered["anchor_time"].iloc[start:stop]],
             }
-        )
+        if patient_index_tensor is not None:
+            batch["patient_index"] = patient_index_tensor[start:stop]
+            batch["seen_patient"] = seen_patient_tensor[start:stop]
+        if event_basis_tensors:
+            batch["event_basis"] = {
+                name: values[start:stop]
+                for name, values in event_basis_tensors.items()
+            }
+        batches.append(batch)
     return batches
 
 
@@ -652,6 +739,7 @@ def predict_neural_batches(
     *,
     hypoglycemia_threshold_mg_dl: float = 70.0,
     hyperglycemia_threshold_mg_dl: float = 180.0,
+    calibrator: Any | None = None,
 ) -> pd.DataFrame:
     from .neural_training import inverse_transform_neuroglycemic_outputs
     from .evaluation import gaussian_mixture_quantile
@@ -674,7 +762,23 @@ def predict_neural_batches(
                 batch.get("clock_uncertainty", torch.zeros_like(batch["staleness"])).to(
                     device
                 ),
+                patient_index=(
+                    batch["patient_index"].to(device)
+                    if batch.get("patient_index") is not None
+                    else None
+                ),
+                seen_patient=(
+                    batch["seen_patient"].to(device)
+                    if batch.get("seen_patient") is not None
+                    else None
+                ),
+                event_basis=(
+                    {name: value.to(device) for name, value in batch["event_basis"].items()}
+                    if batch.get("event_basis") is not None
+                    else None
+                ),
             )
+            availability_rows = batch["availability"].detach().cpu().tolist()
             converted = inverse_transform_neuroglycemic_outputs(outputs, target_standardizer)
             # ``tolist`` avoids depending on PyTorch's optional NumPy ABI at
             # serving time; pandas can consume the resulting Python numbers.
@@ -745,7 +849,18 @@ def predict_neural_batches(
                     strict=True,
                 )
             ):
+                from .calibration import availability_pattern
+
+                pattern = availability_pattern(
+                    modality_names, availability_rows[row_index]
+                )
                 for horizon_index, horizon in enumerate(horizons_minutes):
+                    if calibrator is not None:
+                        lower_level, upper_level = calibrator.levels_for(
+                            int(horizon), pattern
+                        )
+                    else:
+                        lower_level, upper_level = 0.025, 0.975
                     actual = float(target[row_index][horizon_index])
                     row: dict[str, Any] = {
                         "patient_id": patient_id,
@@ -781,7 +896,7 @@ def predict_neural_batches(
                                 weights[row_index][index][horizon_index]
                                 for index in range(len(modality_names))
                             ],
-                            0.025,
+                            lower_level,
                         ),
                         "prediction_upper_mg_dl": gaussian_mixture_quantile(
                             [
@@ -796,7 +911,7 @@ def predict_neural_batches(
                                 weights[row_index][index][horizon_index]
                                 for index in range(len(modality_names))
                             ],
-                            0.975,
+                            upper_level,
                         ),
                         "persistence_glucose_mg_dl": float(
                             batch["persistence_glucose"][row_index].item()
@@ -869,6 +984,7 @@ def modality_ablation_predictions(
     *,
     hypoglycemia_threshold_mg_dl: float = 70.0,
     hyperglycemia_threshold_mg_dl: float = 180.0,
+    calibrator: Any | None = None,
 ) -> dict[str, pd.DataFrame]:
     """Run paired test rows with one or all modalities removed.
 
@@ -902,6 +1018,7 @@ def modality_ablation_predictions(
             horizons_minutes,
             hypoglycemia_threshold_mg_dl=hypoglycemia_threshold_mg_dl,
             hyperglycemia_threshold_mg_dl=hyperglycemia_threshold_mg_dl,
+            calibrator=calibrator,
         )
 
     return {
