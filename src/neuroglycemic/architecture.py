@@ -12,6 +12,10 @@ from .contracts import (
     PredictionEvidence,
 )
 from .health_agent import HealthAgent
+from .service import (
+    NeuralGlucoseForecastRequest,
+    NeuralGlucoseService,
+)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -44,6 +48,7 @@ def run_architecture_case(
     *,
     health_agent: HealthAgent | None = None,
     include_raw_llm_response: bool = False,
+    output_path: Path | None = None,
 ) -> dict[str, Any]:
     """Exercise target-safe routing, missingness, and HealthAgent narration.
 
@@ -64,7 +69,9 @@ def run_architecture_case(
         ["patient_id", "condition", "window_index"]
     )
     row = cogwear.iloc[0]
-    anchor_time = pd.Timestamp(float(row["window_start_unix"]), unit="s", tz="UTC").isoformat()
+    anchor_time = pd.Timestamp(
+        float(row["window_start_unix"]), unit="s", tz="UTC"
+    ).isoformat()
     checkpoint = cogwear_metrics["selected_checkpoints"]
     eeg_quality = 1.0 if int(checkpoint["eeg"]["epoch"]) > 0 else 0.0
     wearable_quality = 1.0 if int(checkpoint["wearable"]["epoch"]) > 0 else 0.0
@@ -232,6 +239,127 @@ def run_architecture_case(
         },
     }
     safe_result = _safe(result)
-    output = project_root / "outputs" / "architecture" / "case_study.json"
+    output = output_path or (
+        project_root / "outputs" / "architecture" / "case_study.json"
+    )
     _write_json(output, safe_result)
+    return safe_result
+
+
+def run_neural_architecture_case(
+    project_root: Path,
+    *,
+    checkpoint_path: Path,
+    request: NeuralGlucoseForecastRequest,
+    workspace_root: Path | None = None,
+    health_agent: HealthAgent | None = None,
+    include_raw_llm_response: bool = False,
+    output_path: Path | None = None,
+) -> dict[str, Any]:
+    """Run a checkpoint-to-HealthAgent neural case study end to end.
+
+    Unlike :func:`run_architecture_case`, this path does not read a prediction
+    CSV, metrics JSON, or a previous case-study artifact.  Its numerical output
+    is produced by one live ``NeuroGlycemicNet.forward`` call restored from the
+    supplied checkpoint.  The HealthAgent remains a post-inference wording
+    layer and cannot change model predictions or learned fusion weights.
+    """
+
+    root = project_root.resolve()
+    allowed_root = (workspace_root or root).expanduser().resolve()
+    checkpoint = checkpoint_path
+    if not checkpoint.is_absolute():
+        checkpoint = allowed_root / checkpoint
+    checkpoint = checkpoint.resolve()
+    if not checkpoint.is_relative_to(allowed_root):
+        raise ValueError("checkpoint_path must stay inside the selected runtime workspace.")
+    service = NeuralGlucoseService.from_checkpoint(checkpoint)
+    response = service.forecast(request)
+    response_values = response.as_dict()
+    modality_evidence = tuple(
+        {
+            "modality": item.modality,
+            "available": item.available,
+            "quality": item.quality,
+            "staleness_minutes": item.staleness_minutes,
+            "learned_weight": item.learned_weight,
+            "predicted_glucose_mg_dl": item.predicted_glucose_mg_dl,
+            "prediction_sd_mg_dl": item.prediction_sd_mg_dl,
+        }
+        for item in response.modality_forecasts
+    )
+    packet = HealthEvidencePacket(
+        patient_id=request.patient_id,
+        anchor_time=request.anchor_time,
+        task=(f"{response.prediction_target}_at_{response.horizon_minutes}_minutes"),
+        model_output={
+            "predicted_glucose_mg_dl": response.predicted_glucose_mg_dl,
+            "prediction_sd_mg_dl": response.prediction_sd_mg_dl,
+            "prediction_lower_mg_dl": response.prediction_lower_mg_dl,
+            "prediction_upper_mg_dl": response.prediction_upper_mg_dl,
+            "hypoglycemia_probability": response.hypoglycemia_probability,
+            "hyperglycemia_probability": response.hyperglycemia_probability,
+            "hypoglycemia_threshold_mg_dl": response.hypoglycemia_threshold_mg_dl,
+            "hyperglycemia_threshold_mg_dl": response.hyperglycemia_threshold_mg_dl,
+            "learned_weights": response_values["learned_weights"],
+            "auxiliary_predictions": response_values["auxiliary_predictions"],
+            "warnings": response_values["warnings"],
+            "abstained": response.abstained,
+        },
+        modality_evidence=modality_evidence,
+        unsupported_outcomes=("stress", "anxiety", "depression"),
+        limitations=(
+            *response.warnings,
+            "This is a research glucose forecast, not a diagnosis or dosing recommendation.",
+            "Stress, anxiety, and depression require separately observed clinical labels and held-out metrics.",
+        ),
+        release_status="research_only_do_not_deploy",
+        metadata={
+            "model_version": response.model_version,
+            "checkpoint_schema_version": response.checkpoint_schema_version,
+            "feature_schema_version": response.feature_schema_version,
+            "horizon_minutes": response.horizon_minutes,
+            "input_cgm": service.input_cgm,
+            "inference_source": "live_neural_checkpoint_forward_pass",
+        },
+    )
+    agent = (health_agent or HealthAgent()).run(
+        packet, include_raw_response=include_raw_llm_response
+    )
+    result = {
+        "architecture_status": {
+            "neural_forward_pass_executed": True,
+            "cached_prediction_artifacts_read": False,
+            "prediction_target": response.prediction_target,
+            "supported_horizons_minutes": list(service.supported_horizons_minutes),
+            "selected_horizon_minutes": response.horizon_minutes,
+            "feature_schema_version": response.feature_schema_version,
+            "checkpoint_schema_version": response.checkpoint_schema_version,
+            "model_version": response.model_version,
+            "llm_is_post_inference_only": True,
+            "release_recommendation": "research_only_do_not_deploy",
+        },
+        "request_context": {
+            "patient_id": request.patient_id,
+            "anchor_time": request.anchor_time,
+            "modality_available": dict(request.availability),
+            "quality": dict(request.quality),
+            "staleness_minutes": dict(request.staleness_minutes),
+        },
+        "neural_forecast": response_values,
+        "health_agent": agent.as_dict(),
+    }
+    safe_result = _safe(result)
+    destination = output_path or (
+        allowed_root
+        / ("runs" if workspace_root is not None else "outputs")
+        / "architecture"
+        / "neural_case_study.json"
+    )
+    if not destination.is_absolute():
+        destination = allowed_root / destination
+    destination = destination.resolve()
+    if not destination.is_relative_to(allowed_root):
+        raise ValueError("output_path must stay inside the selected runtime workspace.")
+    _write_json(destination, safe_result)
     return safe_result

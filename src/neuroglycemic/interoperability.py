@@ -77,6 +77,9 @@ class CanonicalSignalRecord:
     quality: float
     source: str
     lsl_timestamp: float | None = None
+    available_time_utc: str | None = None
+    clock_uncertainty_ms: float = 0.0
+    sequence_number: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -105,6 +108,39 @@ def validate_device_signal(device: str, signal: str, unit: str) -> None:
         )
 
 
+def convert_measurement_unit(
+    value: float, *, source_unit: str, target_unit: str
+) -> float:
+    """Apply a small, explicit clinical unit conversion registry.
+
+    Unknown conversions fail closed. Device adapters must never relabel a value
+    with a target unit without numerically converting it.
+    """
+
+    source = source_unit.strip().lower()
+    target = target_unit.strip().lower()
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        raise ValueError("Measurement values must be finite.")
+    if source == target:
+        return numeric
+    conversions = {
+        ("mmol/l", "mg/dl"): lambda item: item * 18.0182,
+        ("mg/dl", "mmol/l"): lambda item: item / 18.0182,
+        ("fahrenheit", "celsius"): lambda item: (item - 32.0) * 5.0 / 9.0,
+        ("celsius", "fahrenheit"): lambda item: item * 9.0 / 5.0 + 32.0,
+        ("kpa", "mmhg"): lambda item: item * 7.50062,
+        ("fraction", "percent"): lambda item: item * 100.0,
+    }
+    conversion = conversions.get((source, target))
+    if conversion is None:
+        raise ValueError(f"Unsupported unit conversion: {source_unit!r} -> {target_unit!r}.")
+    converted = float(conversion(numeric))
+    if not math.isfinite(converted):
+        raise ValueError("Unit conversion produced a non-finite value.")
+    return converted
+
+
 def canonicalize_wide_stream(
     frame: pd.DataFrame,
     *,
@@ -113,6 +149,7 @@ def canonicalize_wide_stream(
     device: str,
     signal: str,
     unit: str,
+    source_unit: str | None = None,
     timestamp_column: str,
     channel_columns: Mapping[str, str],
     sampling_rate_hz: float,
@@ -120,6 +157,9 @@ def canonicalize_wide_stream(
     quality_column: str | None = None,
     unix_timestamps: bool = False,
     lsl_timestamp_column: str | None = None,
+    available_time_column: str | None = None,
+    clock_uncertainty_ms: float = 0.0,
+    sequence_column: str | None = None,
 ) -> pd.DataFrame:
     """Convert an adapter-specific wide table to one canonical long schema."""
     validate_device_signal(device, signal, unit)
@@ -130,13 +170,21 @@ def canonicalize_wide_stream(
         required.add(quality_column)
     if lsl_timestamp_column:
         required.add(lsl_timestamp_column)
+    if available_time_column:
+        required.add(available_time_column)
+    if sequence_column:
+        required.add(sequence_column)
     missing = required - set(frame.columns)
     if missing:
         raise ValueError(f"Missing stream columns: {sorted(missing)}")
 
+    if not math.isfinite(clock_uncertainty_ms) or clock_uncertainty_ms < 0:
+        raise ValueError("clock_uncertainty_ms must be finite and non-negative.")
     rows: list[dict[str, Any]] = []
-    for row in frame.itertuples(index=False):
-        values = row._asdict()
+    # ``itertuples`` rewrites vendor column names containing spaces, hyphens,
+    # parentheses, or duplicate-looking identifiers. Record dictionaries retain
+    # the exact adapter contract (for example ``SpO2 (%)`` or ``BP-systolic``).
+    for row_index, values in enumerate(frame.to_dict(orient="records")):
         raw_time = values[timestamp_column]
         event_time = (
             datetime.fromtimestamp(float(raw_time), tz=timezone.utc).isoformat()
@@ -150,6 +198,11 @@ def canonicalize_wide_stream(
             value = float(values[input_column])
             if not math.isfinite(value):
                 continue
+            converted = convert_measurement_unit(
+                value,
+                source_unit=source_unit or unit,
+                target_unit=unit,
+            )
             rows.append(
                 CanonicalSignalRecord(
                     patient_id=patient_id,
@@ -157,7 +210,7 @@ def canonicalize_wide_stream(
                     device=device.lower(),
                     signal=signal.lower(),
                     channel=canonical_channel,
-                    value=value,
+                    value=converted,
                     unit=unit,
                     event_time_utc=event_time,
                     sampling_rate_hz=float(sampling_rate_hz),
@@ -167,6 +220,17 @@ def canonicalize_wide_stream(
                         float(values[lsl_timestamp_column])
                         if lsl_timestamp_column
                         else None
+                    ),
+                    available_time_utc=(
+                        _utc_iso(values[available_time_column])
+                        if available_time_column
+                        else event_time
+                    ),
+                    clock_uncertainty_ms=float(clock_uncertainty_ms),
+                    sequence_number=(
+                        int(values[sequence_column])
+                        if sequence_column
+                        else row_index
                     ),
                 ).as_dict()
             )

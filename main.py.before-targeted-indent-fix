@@ -1370,7 +1370,7 @@ def cli() -> None:
         return
 
     if arguments.study == "lsl-session-replay":
-        from src.neuroglycemic.lsl import (
+    from src.neuroglycemic.lsl import (
             load_replay_session_manifest,
             replay_session_manifest,
         )
@@ -1379,9 +1379,9 @@ def cli() -> None:
             parser.error("lsl-session-replay requires --manifest.") 
 
         manifest_path = _require_external_runtime_path(
-            arguments.manifest,
-            label="LSL replay manifest",
-            parser=parser,
+    arguments.manifest,
+    label="LSL replay manifest",
+    parser=parser,
         )
 
         if not manifest_path.is_file():

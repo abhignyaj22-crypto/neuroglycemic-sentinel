@@ -1,0 +1,69 @@
+{
+    "schema_version": "neural-glucose-training-v1",
+    "prediction_target": "future_cgm_glucose_mg_dl",
+    "forecast_horizons_minutes": [30, 60, 90, 120],
+    "target_standardization": "train_only_zscore_per_horizon",
+    "seed": 42,
+    "epochs": 120,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "expert_loss_weight": 0.2,
+    "model": {
+      "hidden_dim": 48,
+      "embedding_dim": 24,
+      "dropout": 0.15,
+      "min_scale": 0.05,
+      "modality_dropout_probability": 0.15
+    },
+    "forecast_mode": "cgm_augmented",
+    "input_cgm": true,
+    "feature_registry": {
+      "cgm": [
+        "cgm_current_mg_dl",
+        "cgm_lag_5m_mg_dl",
+        "cgm_lag_15m_mg_dl",
+        "cgm_lag_30m_mg_dl",
+        "cgm_lag_60m_mg_dl",
+        "cgm_lag_120m_mg_dl",
+        "cgm_delta_5m_mg_dl",
+        "cgm_delta_15m_mg_dl",
+        "cgm_delta_30m_mg_dl",
+        "cgm_mean_30m_mg_dl",
+        "cgm_sd_30m_mg_dl",
+        "cgm_mean_60m_mg_dl",
+        "cgm_sd_60m_mg_dl",
+        "cgm_mean_120m_mg_dl",
+        "cgm_sd_120m_mg_dl",
+        "cgm_slope_30m_mg_dl_per_min",
+        "cgm_slope_60m_mg_dl_per_min"
+      ],
+      "events": [
+        "events_bolus_units_30m",
+        "events_bolus_units_60m",
+        "events_bolus_units_120m",
+        "events_carbohydrate_g_30m",
+        "events_carbohydrate_g_60m",
+        "events_carbohydrate_g_120m",
+        "events_minutes_since_bolus",
+        "events_current_basal_units_per_hour",
+        "events_insulin_on_board_units"
+      ]
+    },
+    "risk_thresholds_mg_dl": {
+      "hypoglycemia": 70.0,
+      "hyperglycemia": 180.0
+    },
+    "meal_context": {
+      "lookback_minutes": 240,
+      "lag_centers_minutes": [0, 30, 60, 120],
+      "lag_width_minutes": 30,
+      "value_columns": ["carbohydrate_g", "bolus_insulin_units"],
+      "require_event_and_available_time_before_anchor": true
+    },
+    "gradient_clip_norm": 1.0,
+    "early_stopping_patience": 15,
+    "minimum_delta": 0.0001,
+    "device": "cpu",
+    "checkpoint_relative_path": "outputs/models/diatrend_glucose_best.pt"
+  }
+  

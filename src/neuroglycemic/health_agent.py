@@ -29,6 +29,21 @@ _UNSAFE_PHRASES = (
     "medical advice",
 )
 
+_DIRECT_IDENTIFIER_KEYS = frozenset(
+    {
+        "patient_id",
+        "patient_identifier",
+        "patient_reference",
+        "subject_id",
+        "hadm_id",
+        "stay_id",
+        "encounter_id",
+        "admission_id",
+        "medical_record_number",
+        "mrn",
+        "person_id",
+    }
+)
 
 @dataclass(frozen=True)
 class HealthAgentTelemetry:
@@ -176,16 +191,32 @@ class HealthAgent:
     def _sanitize(packet: dict[str, Any]) -> dict[str, Any]:
         safe = json.loads(json.dumps(packet))
         patient_id = str(safe.pop("patient_id"))
-        safe["patient_reference"] = hashlib.sha256(patient_id.encode("utf-8")).hexdigest()[:12]
-        # An external wording model never needs raw signals, EHR rows, or free text.
+
         safe["metadata"] = {
             key: value
             for key, value in safe.get("metadata", {}).items()
-            if key in {"cohort", "horizon_hours", "model_version", "data_scope"}
+            if key
+            in {
+                "cohort",
+                "horizon_hours",
+                "model_version",
+                "data_scope",
+            }
         }
+
+        safe = _recursively_deidentify(
+            safe,
+            patient_id=patient_id,
+        )
+        safe["patient_reference"] = hashlib.sha256(
+            patient_id.encode("utf-8")
+        ).hexdigest()[:12]
         return safe
 
-    def _invoke_langchain(self, packet: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    def _invoke_langchain(
+        self,
+        packet: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]]:
         try:
             from langchain_core.output_parsers import StrOutputParser
             from langchain_core.prompts import ChatPromptTemplate
@@ -255,6 +286,48 @@ class HealthAgent:
 def _collect_numbers(text: str) -> tuple[float, ...]:
     return tuple(float(value) for value in re.findall(r"(?<![A-Za-z])[-+]?\d+(?:\.\d+)?", text))
 
+def _recursively_deidentify(
+    value: Any,
+    *,
+    patient_id: str,
+) -> Any:
+    """Remove identifiers from nested JSON-compatible evidence."""
+
+    if isinstance(value, dict):
+        cleaned: dict[str, Any] = {}
+
+        for key, item in value.items():
+            normalized_key = str(key).strip().lower()
+
+            if normalized_key in _DIRECT_IDENTIFIER_KEYS:
+                continue
+
+            cleaned[str(key)] = _recursively_deidentify(
+                item,
+                patient_id=patient_id,
+            )
+
+        return cleaned
+
+    if isinstance(value, list):
+        return [
+            _recursively_deidentify(item, patient_id=patient_id)
+            for item in value
+        ]
+
+    if isinstance(value, tuple):
+        return tuple(
+            _recursively_deidentify(item, patient_id=patient_id)
+            for item in value
+        )
+
+    if isinstance(value, str) and patient_id:
+        return value.replace(
+            patient_id,
+            "[redacted-patient]",
+        )
+
+    return value
 
 def build_openai_llm(*, model: str, temperature: float = 0.0) -> Any:
     """Construct the optional LangChain OpenAI chat client at the CLI boundary."""

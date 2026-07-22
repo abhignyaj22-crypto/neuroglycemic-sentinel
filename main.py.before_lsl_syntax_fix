@@ -51,26 +51,6 @@ from src.cogwear_study.split import attach_split, split_patients
 
 TARGET = "target_cognitive_load"
 
-NEURAL_AND_INTEROPERABILITY_COMMANDS = (
-    "lsl-audit",
-    "lsl-replay",
-    "lsl-session-replay",
-    "prepare-lsl-glucose",
-    "prepare-mimic-neural",
-    "prepare-diatrend",
-    "train-neural",
-    "evaluate-neural",
-    "neural-case",
-)
-
-# These reproduce the original v3 experiments. They intentionally remain
-# available for comparison, but they are not the neural CGM product path.
-LEGACY_RESEARCH_COMMANDS = (
-    "eeg-wearable",
-    "ehr-glucose",
-    "architecture",
-)
-
 
 def print_frame(name: str, frame: pd.DataFrame) -> None:
     print(f"\n{name}")
@@ -989,22 +969,26 @@ def run_neural_evaluate(
 
 
 def cli() -> None:
-    parser = argparse.ArgumentParser(
-        description=__doc__,
-        epilog=(
-            "Choose an explicit command. For neural training, use train-neural; "
-            "for live/XDF inspection, use lsl-audit. The legacy research "
-            "commands reproduce earlier non-product experiments only."
-        ),
-    )
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "study",
-        choices=NEURAL_AND_INTEROPERABILITY_COMMANDS
-        + LEGACY_RESEARCH_COMMANDS,
-        help=(
-            "Command to execute. No implicit study is run. eeg-wearable, "
-            "ehr-glucose, and architecture are legacy research commands."
+        nargs="?",
+        choices=(
+            "eeg-wearable",
+            "ehr-glucose",
+            "architecture",
+            "lsl-audit",
+            "lsl-replay",
+            "lsl-session-replay",
+            "prepare-lsl-glucose",
+            "prepare-mimic-neural",
+            "prepare-diatrend",
+            "train-neural",
+            "evaluate-neural",
+            "neural-case",
         ),
+        default="eeg-wearable",
+        help="Study to execute. The default preserves the original EEG/wearable run.",
     )
     parser.add_argument(
         "--config",
@@ -1134,22 +1118,6 @@ def cli() -> None:
     parser.add_argument("--train-fraction", type=float, default=0.70)
     parser.add_argument("--validation-fraction", type=float, default=0.15)
     arguments = parser.parse_args()
-
-    if arguments.study is None:
-        parser.print_help(sys.stderr)
-        parser.exit(
-            2,
-            "\nerror: no command selected; choose train-neural, lsl-audit, "
-            "prepare-lsl-glucose, or another explicit command.\n",
-        )
-
-    if arguments.study in LEGACY_RESEARCH_COMMANDS:
-        print(
-            "LEGACY RESEARCH MODE: this command does not train the production "
-            "neural CGM model. Use train-neural with an external aligned cohort "
-            "for checkpoint-backed glucose forecasting.\n"
-        )
-
     if arguments.study == "eeg-wearable":
         config_path = arguments.config or PROJECT_ROOT / "config" / "study.json"
         main(config_path, rebuild_features=arguments.rebuild)
@@ -1376,36 +1344,34 @@ def cli() -> None:
         )
 
         if arguments.manifest is None:
-            parser.error("lsl-session-replay requires --manifest.") 
-
+            parser.error("lsl-session-replay requires --manifest.")
+        _require_external_runtime_path(
         manifest_path = _require_external_runtime_path(
             arguments.manifest,
             label="LSL replay manifest",
             parser=parser,
         )
-
+        session = load_replay_session_manifest(arguments.manifest)
         if not manifest_path.is_file():
             parser.error(
                 "LSL replay manifest does not exist or is not a file: "
                 f"{manifest_path}"
             )
-
         session = load_replay_session_manifest(manifest_path)
-
         for stream in session.streams:
+            _require_external_runtime_path(
             data_path = _require_external_runtime_path(
                 stream.data_path,
                 label=f"LSL replay data for {stream.source_id}",
                 parser=parser,
             )
-
             if not data_path.is_file():
                 parser.error(
                     f"LSL replay data for {stream.source_id} does not exist "
                     f"or is not a file: {data_path}"
                 )
-
         replay_audit = replay_session_manifest(
+            arguments.manifest,
             manifest_path,
             speed=arguments.replay_speed,
             startup_delay_seconds=arguments.startup_delay_seconds,
@@ -1550,9 +1516,6 @@ def cli() -> None:
         print("\nCHECKPOINT-BACKED NEURAL ARCHITECTURE CASE STUDY")
         print(json.dumps(case, indent=2))
         return
-
-    if arguments.study not in {"ehr-glucose", "architecture"}:
-        parser.error(f"No command handler is registered for {arguments.study!r}.")
 
     from src.neuroglycemic.config import load_ehr_config
     from src.neuroglycemic.pipeline import run_ehr_glucose_pipeline

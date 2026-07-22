@@ -1,0 +1,67 @@
+{
+  "schema_version": "neural-glucose-training-v1",
+  "prediction_target": "future_cgm_glucose_mg_dl",
+  "forecast_horizons_minutes": [30, 60],
+  "target_standardization": "train_only_zscore_per_horizon",
+  "seed": 42,
+  "epochs": 100,
+  "learning_rate": 0.001,
+  "weight_decay": 0.0001,
+  "expert_loss_weight": 0.25,
+  "model": {
+    "hidden_dim": 32,
+    "embedding_dim": 16,
+    "dropout": 0.1,
+    "min_scale": 0.05,
+    "modality_dropout_probability": 0.15
+  },
+  "forecast_mode": "ambient_no_cgm",
+  "input_cgm": false,
+  "feature_registry": {
+    "eeg": [
+      "eeg_delta_mean",
+      "eeg_theta_mean",
+      "eeg_alpha_mean",
+      "eeg_beta_mean",
+      "eeg_gamma_mean",
+      "eeg_delta_variability",
+      "eeg_theta_variability",
+      "eeg_alpha_variability",
+      "eeg_beta_variability",
+      "eeg_gamma_variability",
+      "eeg_theta_alpha_ratio",
+      "eeg_beta_alpha_ratio"
+    ],
+    "wearable": [
+      "wearable_ihealth_heart_rate_mean_bpm",
+      "wearable_ihealth_spo2_mean_percent",
+      "wearable_ihealth_systolic_bp_last_mmhg",
+      "wearable_ihealth_diastolic_bp_last_mmhg",
+      "wearable_pulse_heart_rate_mean_bpm",
+      "wearable_pulse_spo2_mean_percent",
+      "wearable_pulse_ppg_variability"
+    ]
+  },
+  "risk_thresholds_mg_dl": {
+    "hypoglycemia": 70.0,
+    "hyperglycemia": 180.0
+  },
+  "meal_context": {
+    "lookback_minutes": 240,
+    "lag_centers_minutes": [0, 15, 30, 45, 60, 90, 120, 180],
+    "lag_width_minutes": 20,
+    "value_columns": [
+      "carbohydrate_g",
+      "protein_g",
+      "fat_g",
+      "fiber_g",
+      "bolus_insulin_units"
+    ],
+    "require_event_and_available_time_before_anchor": true
+  },
+  "gradient_clip_norm": 1.0,
+  "early_stopping_patience": 12,
+  "minimum_delta": 0.0001,
+  "device": "cpu",
+  "checkpoint_relative_path": "outputs/models/neural_glucose_best.pt"
+}

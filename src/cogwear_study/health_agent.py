@@ -49,7 +49,7 @@ def deterministic_health_agent(payload: dict[str, Any]) -> str:
         f"EEG alpha={payload['alpha_eeg']:.3f}, wearable beta={payload['beta_wearable']:.3f}, "
         f"combined cognitive-load probability={payload['combined_probability']:.3f}. "
         f"Learned fusion weights were EEG={weights['eeg']:.3f} and wearable={weights['wearable']:.3f}. "
-        "Interpret only as a small-cohort research result, not a diagnosis."
+        "Interpret only as a small-cohort research result, not an ultimate diagnosis."
     )
 
 

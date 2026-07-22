@@ -1369,51 +1369,51 @@ def cli() -> None:
         print(json.dumps(replay_audit, indent=2))
         return
 
-    if arguments.study == "lsl-session-replay":
-        from src.neuroglycemic.lsl import (
-            load_replay_session_manifest,
-            replay_session_manifest,
-        )
-
-        if arguments.manifest is None:
-            parser.error("lsl-session-replay requires --manifest.") 
-
-        manifest_path = _require_external_runtime_path(
-            arguments.manifest,
-            label="LSL replay manifest",
-            parser=parser,
-        )
-
-        if not manifest_path.is_file():
-            parser.error(
-                "LSL replay manifest does not exist or is not a file: "
-                f"{manifest_path}"
+        if arguments.study == "lsl-session-replay":
+	    from src.neuroglycemic.lsl import (
+                load_replay_session_manifest,
+                replay_session_manifest,
             )
 
-        session = load_replay_session_manifest(manifest_path)
+            if arguments.manifest is None:
+                parser.error("lsl-session-replay requires --manifest.") 
 
-        for stream in session.streams:
-            data_path = _require_external_runtime_path(
-                stream.data_path,
-                label=f"LSL replay data for {stream.source_id}",
-                parser=parser,
+            manifest_path = _require_external_runtime_path(
+		arguments.manifest,
+		label="LSL replay manifest",
+		parser=parser,
             )
 
-            if not data_path.is_file():
+            if not manifest_path.is_file():
                 parser.error(
-                    f"LSL replay data for {stream.source_id} does not exist "
-                    f"or is not a file: {data_path}"
+                    "LSL replay manifest does not exist or is not a file: "
+                    f"{manifest_path}"
                 )
 
-        replay_audit = replay_session_manifest(
-            manifest_path,
-            speed=arguments.replay_speed,
-            startup_delay_seconds=arguments.startup_delay_seconds,
-            max_rows_per_stream=arguments.max_rows,
-            dry_run=arguments.dry_run,
-        )
-        print(json.dumps(replay_audit, indent=2))
-        return
+            session = load_replay_session_manifest(manifest_path)
+
+            for stream in session.streams:
+                data_path = _require_external_runtime_path(
+                    stream.data_path,
+                    label=f"LSL replay data for {stream.source_id}",
+                    parser=parser,
+                )
+
+                if not data_path.is_file():
+                    parser.error(
+                        f"LSL replay data for {stream.source_id} does not exist "
+                        f"or is not a file: {data_path}"
+                    )
+
+            replay_audit = replay_session_manifest(
+                manifest_path,
+                speed=arguments.replay_speed,
+                startup_delay_seconds=arguments.startup_delay_seconds,
+                max_rows_per_stream=arguments.max_rows,
+                dry_run=arguments.dry_run,
+            )
+            print(json.dumps(replay_audit, indent=2))
+            return
 
     if arguments.study in {"train-neural", "evaluate-neural"}:
         if arguments.data is None:
