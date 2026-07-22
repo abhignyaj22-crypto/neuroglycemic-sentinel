@@ -34,7 +34,13 @@ EEG_BANDS: dict[str, tuple[float, float]] = {
 LSL_EEG_FEATURES = tuple(
     [f"eeg_{band}_mean" for band in EEG_BANDS]
     + [f"eeg_{band}_variability" for band in EEG_BANDS]
-    + ["eeg_theta_alpha_ratio", "eeg_beta_alpha_ratio"]
+    + [
+        "eeg_theta_alpha_ratio",
+        "eeg_beta_alpha_ratio",
+        "eeg_source_count",
+        "eeg_alpha_between_source_std",
+        "eeg_beta_between_source_std",
+    ]
 )
 
 
@@ -52,6 +58,8 @@ class WearableSummary:
     feature_name: str
     aggregation: str
     clock_uncertainty_ms: float = 0.0
+    source_unit: str | None = None
+    target_unit: str | None = None
 
 
 @dataclass(frozen=True)
@@ -76,6 +84,7 @@ class LSLWindowConfig:
     eeg_sources: tuple[EEGSource, ...]
     wearable_summaries: tuple[WearableSummary, ...]
     cgm_reference: CGMReference
+    session_lsl_time_at_start: float | None = None
 
 
 def _nonempty_text(value: Any, *, name: str) -> str:
@@ -104,9 +113,14 @@ def load_lsl_window_config(path: Path) -> LSLWindowConfig:
         "wearable_summaries",
         "cgm_reference",
     }
-    if not isinstance(values, dict) or set(values) != required:
+    optional = {"session_lsl_time_at_start"}
+    if (
+        not isinstance(values, dict)
+        or not required.issubset(values)
+        or bool(set(values) - required - optional)
+    ):
         missing = required - set(values) if isinstance(values, dict) else required
-        extra = set(values) - required if isinstance(values, dict) else set()
+        extra = set(values) - required - optional if isinstance(values, dict) else set()
         raise ValueError(
             f"LSL window config has missing={sorted(missing)} and extra={sorted(extra)}."
         )
@@ -154,13 +168,19 @@ def load_lsl_window_config(path: Path) -> LSLWindowConfig:
     wearable: list[WearableSummary] = []
     allowed_aggregations = {"mean", "std", "last", "min", "max", "sum", "delta", "slope", "rmssd"}
     for index, item in enumerate(values["wearable_summaries"]):
-        if not isinstance(item, dict) or set(item) != {
+        required_wearable = {
             "source_id",
             "column",
             "feature_name",
             "aggregation",
             "clock_uncertainty_ms",
-        }:
+        }
+        optional_wearable = {"source_unit", "target_unit"}
+        if (
+            not isinstance(item, dict)
+            or not required_wearable.issubset(item)
+            or bool(set(item) - required_wearable - optional_wearable)
+        ):
             raise ValueError(f"wearable_summaries[{index}] has an invalid schema.")
         feature_name = _nonempty_text(item["feature_name"], name="wearable feature_name")
         aggregation = _nonempty_text(item["aggregation"], name="wearable aggregation")
@@ -171,6 +191,10 @@ def load_lsl_window_config(path: Path) -> LSLWindowConfig:
             raise ValueError(f"Unsupported wearable aggregation {aggregation!r}.")
         if not math.isfinite(uncertainty) or uncertainty < 0:
             raise ValueError("Wearable clock uncertainty must be finite and non-negative.")
+        source_unit = item.get("source_unit")
+        target_unit = item.get("target_unit")
+        if (source_unit is None) != (target_unit is None):
+            raise ValueError("Wearable source_unit and target_unit must be supplied together.")
         wearable.append(
             WearableSummary(
                 source_id=_nonempty_text(item["source_id"], name="wearable source_id"),
@@ -178,6 +202,8 @@ def load_lsl_window_config(path: Path) -> LSLWindowConfig:
                 feature_name=feature_name,
                 aggregation=aggregation,
                 clock_uncertainty_ms=uncertainty,
+                source_unit=(str(source_unit).strip() if source_unit is not None else None),
+                target_unit=(str(target_unit).strip() if target_unit is not None else None),
             )
         )
     if len({value.feature_name for value in wearable}) != len(wearable):
@@ -195,6 +221,11 @@ def load_lsl_window_config(path: Path) -> LSLWindowConfig:
         raise ValueError("CGM clock uncertainty must be finite and non-negative.")
     if not eeg_sources and not wearable:
         raise ValueError("At least one EEG or wearable input is required.")
+    lsl_time_at_start = values.get("session_lsl_time_at_start")
+    if lsl_time_at_start is not None:
+        lsl_time_at_start = float(lsl_time_at_start)
+        if not math.isfinite(lsl_time_at_start):
+            raise ValueError("session_lsl_time_at_start must be finite when supplied.")
     return LSLWindowConfig(
         patient_id=_nonempty_text(values["patient_id"], name="patient_id"),
         cohort_id=_nonempty_text(values["cohort_id"], name="cohort_id"),
@@ -213,6 +244,7 @@ def load_lsl_window_config(path: Path) -> LSLWindowConfig:
             unit=_nonempty_text(cgm["unit"], name="CGM unit"),
             clock_uncertainty_ms=cgm_uncertainty,
         ),
+        session_lsl_time_at_start=lsl_time_at_start,
     )
 
 
@@ -221,7 +253,10 @@ def _frames_by_source_id(
 ) -> tuple[dict[str, pd.DataFrame], dict[str, pd.Series]]:
     if len(audit) != len(frames):
         raise ValueError("XDF audit and stream-frame counts do not match.")
-    frame_values = list(frames.values())
+    frame_keys = {str(value).strip() for value in frames}
+    audit_keys = {str(value).strip() for value in audit["source_id"]}
+    if frame_keys != audit_keys:
+        raise ValueError("XDF audit source_id values do not match parsed stream frames.")
     result: dict[str, pd.DataFrame] = {}
     metadata: dict[str, pd.Series] = {}
     for index, row in audit.reset_index(drop=True).iterrows():
@@ -230,7 +265,7 @@ def _frames_by_source_id(
             raise ValueError("Every training XDF stream needs a non-empty source_id.")
         if source_id in result:
             raise ValueError(f"Duplicate XDF source_id {source_id!r}.")
-        result[source_id] = frame_values[index]
+        result[source_id] = frames[source_id]
         metadata[source_id] = row
     return result, metadata
 
@@ -374,7 +409,12 @@ def build_lsl_glucose_windows(
         ],
         dtype=float,
     )
-    keep_cgm = np.isfinite(cgm_times) & np.isfinite(cgm_values) & (cgm_values > 0)
+    keep_cgm = (
+        np.isfinite(cgm_times)
+        & np.isfinite(cgm_values)
+        & (cgm_values >= 20.0)
+        & (cgm_values <= 600.0)
+    )
     cgm_times, cgm_values = cgm_times[keep_cgm], cgm_values[keep_cgm]
     order = np.argsort(cgm_times, kind="stable")
     cgm_times, cgm_values = cgm_times[order], cgm_values[order]
@@ -403,9 +443,13 @@ def build_lsl_glucose_windows(
         float(config.stride_seconds),
         dtype=float,
     )
-    origin_lsl = min(
-        float(pd.to_numeric(value["lsl_timestamp"], errors="coerce").min())
-        for value in by_source.values()
+    origin_lsl = (
+        float(config.session_lsl_time_at_start)
+        if config.session_lsl_time_at_start is not None
+        else min(
+            float(pd.to_numeric(value["lsl_timestamp"], errors="coerce").min())
+            for value in by_source.values()
+        )
     )
     session_start = pd.Timestamp(config.session_start_utc)
 
@@ -448,12 +492,36 @@ def build_lsl_glucose_windows(
                     float(pd.to_numeric(window["lsl_timestamp"], errors="coerce").max())
                 )
         eeg_available = bool(eeg_feature_sets)
+        pooling_weights = np.asarray(eeg_quality, dtype=float)
+        if pooling_weights.size:
+            pooling_weights = pooling_weights / pooling_weights.sum()
         for feature in LSL_EEG_FEATURES:
-            row[feature] = (
-                float(np.mean([value[feature] for value in eeg_feature_sets]))
-                if eeg_available
-                else np.nan
-            )
+            if feature == "eeg_source_count":
+                value = float(len(eeg_feature_sets)) if eeg_available else np.nan
+            elif feature == "eeg_alpha_between_source_std":
+                value = (
+                    float(np.std([item["eeg_alpha_mean"] for item in eeg_feature_sets]))
+                    if eeg_available
+                    else np.nan
+                )
+            elif feature == "eeg_beta_between_source_std":
+                value = (
+                    float(np.std([item["eeg_beta_mean"] for item in eeg_feature_sets]))
+                    if eeg_available
+                    else np.nan
+                )
+            else:
+                value = (
+                    float(
+                        np.average(
+                            [item[feature] for item in eeg_feature_sets],
+                            weights=pooling_weights,
+                        )
+                    )
+                    if eeg_available
+                    else np.nan
+                )
+            row[feature] = value
         row.update(
             {
                 "eeg_available": eeg_available,
@@ -471,7 +539,12 @@ def build_lsl_glucose_windows(
                 "eeg_patient_id": config.patient_id if eeg_available else None,
                 "eeg_cohort_id": config.cohort_id if eeg_available else None,
                 "eeg_anchor_time": row["anchor_time"] if eeg_available else pd.NaT,
-                "eeg_available_time": row["anchor_time"] if eeg_available else pd.NaT,
+                "eeg_available_time": (
+                    session_start
+                    + pd.to_timedelta(max(eeg_last_samples) - origin_lsl, unit="s")
+                    if eeg_available
+                    else pd.NaT
+                ),
             }
         )
 
@@ -485,7 +558,33 @@ def build_lsl_glucose_windows(
                     f"column {specification.column!r}."
                 )
             window = _slice(stream, start, anchor)
+            observed_unit = str(
+                stream.attrs.get("channel_units", {}).get(specification.column, "")
+            ).strip()
+            if (
+                specification.source_unit
+                and observed_unit
+                and observed_unit.lower() != specification.source_unit.lower()
+            ):
+                raise ValueError(
+                    f"Wearable channel {specification.column!r} unit {observed_unit!r} "
+                    f"does not match configured source_unit {specification.source_unit!r}."
+                )
             values = pd.to_numeric(window[specification.column], errors="coerce").to_numpy(float)
+            if specification.source_unit and specification.target_unit:
+                values = np.asarray(
+                    [
+                        convert_measurement_unit(
+                            value,
+                            source_unit=specification.source_unit,
+                            target_unit=specification.target_unit,
+                        )
+                        if math.isfinite(value)
+                        else np.nan
+                        for value in values
+                    ],
+                    dtype=float,
+                )
             times = pd.to_numeric(window["lsl_timestamp"], errors="coerce").to_numpy(float)
             summary = _aggregate(values, times, specification.aggregation)
             row[specification.feature_name] = summary
@@ -514,11 +613,25 @@ def build_lsl_glucose_windows(
                 "wearable_patient_id": config.patient_id if wearable_available else None,
                 "wearable_cohort_id": config.cohort_id if wearable_available else None,
                 "wearable_anchor_time": row["anchor_time"] if wearable_available else pd.NaT,
-                "wearable_available_time": row["anchor_time"] if wearable_available else pd.NaT,
+                "wearable_available_time": (
+                    session_start
+                    + pd.to_timedelta(max(wearable_last_samples) - origin_lsl, unit="s")
+                    if wearable_available
+                    else pd.NaT
+                ),
             }
         )
         if not (eeg_available or wearable_available):
             continue
+        current_reference = _target_at(
+            cgm_times,
+            cgm_values,
+            anchor,
+            config.target_tolerance_minutes * 60.0,
+        )
+        row["reference_current_glucose_mg_dl"] = (
+            current_reference[0] if current_reference else np.nan
+        )
         for horizon in config.horizons_minutes:
             target = _target_at(
                 cgm_times,
@@ -561,6 +674,11 @@ def build_lsl_glucose_windows(
             "eeg": list(LSL_EEG_FEATURES),
             "wearable": [value.feature_name for value in config.wearable_summaries],
         },
+        "time_origin_mode": (
+            "explicit_session_marker"
+            if config.session_lsl_time_at_start is not None
+            else "fallback_earliest_stream_timestamp"
+        ),
     }
     return result, audit_result
 

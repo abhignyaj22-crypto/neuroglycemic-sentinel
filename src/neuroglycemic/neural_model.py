@@ -461,22 +461,27 @@ def neuroglycemic_loss(
         mask=label_mask,
         sample_weight=sample_weight,
     )
-    expanded_target = target.unsqueeze(1).expand_as(expert_mean)
     expert_mask = availability.unsqueeze(-1) & label_mask.unsqueeze(1)
     # Normalize each modality separately so a frequently observed stream cannot
     # dominate the expert objective solely through coverage.
     per_modality = []
     for modality_index in range(expert_mean.shape[1]):
-        per_modality.append(
-            gaussian_nll(
-                target,
-                expert_mean[:, modality_index, :],
-                expert_scale[:, modality_index, :],
-                mask=expert_mask[:, modality_index, :],
-                sample_weight=sample_weight,
+        modality_mask = expert_mask[:, modality_index, :]
+        if bool(modality_mask.any()):
+            per_modality.append(
+                gaussian_nll(
+                    target,
+                    expert_mean[:, modality_index, :],
+                    expert_scale[:, modality_index, :],
+                    mask=modality_mask,
+                    sample_weight=sample_weight,
+                )
             )
-        )
-    expert_nll = torch.stack(per_modality).mean()
+    expert_nll = (
+        torch.stack(per_modality).mean()
+        if per_modality
+        else mixture_nll.new_zeros(())
+    )
     total = mixture_nll + float(expert_loss_weight) * expert_nll
     result = {"mixture_nll": mixture_nll, "expert_nll": expert_nll}
     task_outputs = outputs.get("auxiliary_outputs", {})

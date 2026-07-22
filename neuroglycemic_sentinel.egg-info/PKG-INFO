@@ -1,0 +1,24 @@
+Metadata-Version: 2.4
+Name: neuroglycemic-sentinel
+Version: 0.4.0
+Summary: Causal multimodal neural glucose forecasting research software
+Requires-Python: <3.14,>=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: numpy<2,>=1.26
+Requires-Dist: pandas<3,>=2.1
+Requires-Dist: pyarrow<22,>=15
+Requires-Dist: scipy<2,>=1.11
+Requires-Dist: scikit-learn<2,>=1.4
+Requires-Dist: torch<3,>=2.2
+Provides-Extra: acquisition
+Requires-Dist: pylsl<2,>=1.16; extra == "acquisition"
+Requires-Dist: pyxdf<2,>=1.16; extra == "acquisition"
+Provides-Extra: plots
+Requires-Dist: matplotlib<4,>=3.8; extra == "plots"
+Provides-Extra: llm
+Requires-Dist: langchain-core<2,>=1.0; extra == "llm"
+Requires-Dist: langchain-openai<2,>=1.0; extra == "llm"
+Provides-Extra: excel
+Requires-Dist: openpyxl<4,>=3.1; extra == "excel"
+Provides-Extra: dev
+Requires-Dist: pytest<10,>=8; extra == "dev"

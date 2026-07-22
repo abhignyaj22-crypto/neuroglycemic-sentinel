@@ -218,6 +218,12 @@ def load_replay_session_manifest(path: Path) -> ReplaySession:
         raise ValueError("Every replay outlet name/type/source_id identity must be unique.")
     if len({value.source_id for value in streams}) != len(streams):
         raise ValueError("Every replay outlet source_id must be globally unique.")
+    if len({value.participant_key for value in streams}) != 1:
+        raise ValueError("Every stream in a replay session must share one participant_key.")
+    if len({value.session_id for value in streams}) != 1:
+        raise ValueError("Every stream in a replay session must share one session_id.")
+    if len({value.timestamp_format for value in streams}) != 1:
+        raise ValueError("A replay session cannot mix timestamp clock domains.")
     return ReplaySession(
         schema_version=str(values["schema_version"]), streams=tuple(streams)
     )
@@ -254,7 +260,9 @@ def _prepare_replay_stream(
         )
     seconds = _source_seconds(frame[stream.timestamp_column], stream.timestamp_format)
     matrix = frame[columns].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)
-    keep = np.isfinite(seconds) & np.isfinite(matrix).all(axis=1)
+    # Preserve per-channel missingness; a partially missing packet remains an
+    # observed packet and downstream masks must see that fact.
+    keep = np.isfinite(seconds) & np.isfinite(matrix).any(axis=1)
     seconds, matrix = seconds[keep], matrix[keep]
     if max_rows is not None:
         seconds, matrix = seconds[:max_rows], matrix[:max_rows]
@@ -571,7 +579,11 @@ def audit_xdf(path: Path) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
         info = stream["info"]
         name = str(info.get("name", [f"stream_{index}"])[0])
         stream_type = str(info.get("type", [""])[0])
-        source_id = str(info.get("source_id", [""])[0])
+        source_id = str(info.get("source_id", [""])[0]).strip()
+        if not source_id:
+            raise ValueError(f"XDF stream {name!r} has no stable source_id.")
+        if source_id in frames:
+            raise ValueError(f"XDF contains duplicate source_id {source_id!r}.")
         rate = float(info.get("nominal_srate", [0.0])[0])
         channel_count = int(info.get("channel_count", [0])[0])
         timestamps = np.asarray(stream.get("time_stamps", []), dtype=float)
@@ -600,7 +612,7 @@ def audit_xdf(path: Path) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
         frame.attrs["channel_units"] = dict(
             zip(_unique_labels(channel_labels), channel_units, strict=True)
         )
-        frames[f"{index}:{name}"] = frame
+        frames[source_id] = frame
     audit_frame = pd.DataFrame(audits)
     audit_frame.attrs["xdf_header"] = header
     return audit_frame, frames
@@ -651,7 +663,10 @@ def replay_numeric_table(
     )
     for column in channel_columns:
         selected[column] = pd.to_numeric(selected[column], errors="coerce")
-    selected = selected.dropna().sort_values("_source_seconds")
+    selected = selected.loc[
+        np.isfinite(selected["_source_seconds"])
+        & selected[list(channel_columns)].notna().any(axis=1)
+    ]
     if max_rows is not None:
         selected = selected.head(max_rows)
     if selected.empty:
@@ -661,7 +676,7 @@ def replay_numeric_table(
         duplicate_steps = int(np.sum(differences == 0))
         backward_steps = int(np.sum(differences < 0))
         raise ValueError(
-            "Replay timestamps must be strictly increasing after channel "
+            "Replay timestamps must be strictly increasing in recorded order after channel "
             f"filtering; duplicate_steps={duplicate_steps}, "
             f"backward_steps={backward_steps}."
         )
@@ -689,12 +704,14 @@ def replay_numeric_table(
     matrix = selected[list(channel_columns)].to_numpy(dtype=np.float32)
     started = time.monotonic()
     previous = float(source_seconds[0])
+    lsl_start = float(pylsl.local_clock())
     for index, (timestamp, sample) in enumerate(zip(source_seconds, matrix, strict=True)):
         if index:
             delay = max(0.0, float(timestamp - previous) / float(speed))
             if delay:
                 time.sleep(delay)
-        outlet.push_sample(sample.tolist(), timestamp=pylsl.local_clock())
+        scheduled = lsl_start + (float(timestamp) - float(source_seconds[0])) / float(speed)
+        outlet.push_sample(sample.tolist(), timestamp=scheduled)
         previous = float(timestamp)
     return {
         "stream_name": stream_name,

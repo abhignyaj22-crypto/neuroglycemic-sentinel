@@ -43,7 +43,7 @@ def _recorded_shape_fixture():
             {"source_id": "cgm-1", "nominal_rate_hz": 1.0 / 30.0},
         ]
     )
-    frames = {"0:eeg": eeg, "1:pulse": pulse, "2:cgm": cgm}
+    frames = {"emotiv-1": eeg, "pulse-1": pulse, "cgm-1": cgm}
     return audit, frames
 
 
@@ -105,9 +105,25 @@ def test_lsl_window_builder_extracts_nonzero_eeg_and_exact_future_labels(
 
 def test_lsl_window_builder_keeps_missing_eeg_as_missing_not_zero() -> None:
     audit, frames = _recorded_shape_fixture()
-    frames["0:eeg"] = frames["0:eeg"].loc[lambda value: value["lsl_timestamp"] < 60]
+    frames["emotiv-1"] = frames["emotiv-1"].loc[
+        lambda value: value["lsl_timestamp"] < 60
+    ]
     windows, _ = build_lsl_glucose_windows(audit, frames, _config())
     missing = windows.loc[~windows["eeg_available"]]
     assert not missing.empty
     assert missing[list(LSL_EEG_FEATURES)].isna().all(axis=None)
     assert missing["wearable_available"].all()
+
+
+def test_xdf_frames_are_joined_by_source_id_not_dictionary_order() -> None:
+    audit, frames = _recorded_shape_fixture()
+    reversed_frames = {
+        "cgm-1": frames["cgm-1"],
+        "pulse-1": frames["pulse-1"],
+        "emotiv-1": frames["emotiv-1"],
+    }
+    windows, _ = build_lsl_glucose_windows(audit, reversed_frames, _config())
+    assert windows["eeg_alpha_mean"].median() > 0.8
+    assert windows["wearable_heart_rate_mean_bpm"].notna().any()
+    assert windows["eeg_available_time"].le(windows["anchor_time"]).all()
+    assert windows["wearable_available_time"].le(windows["anchor_time"]).all()

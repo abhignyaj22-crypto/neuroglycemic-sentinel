@@ -21,6 +21,13 @@ LOINC_CGM_READING_MASS = "99504-3"
 FORECAST_CODE_SYSTEM = "https://neuroglycemic.example/fhir/CodeSystem/forecast"
 
 
+def _patient_reference(value: str) -> str:
+    reference = str(value).strip()
+    if not reference.startswith("Patient/") or len(reference) <= len("Patient/"):
+        raise ValueError("patient_reference must be a non-empty Patient/<id> reference.")
+    return reference
+
+
 def _iso(value: str) -> str:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -51,8 +58,7 @@ def cgm_sensor_observation(
     source_identifier: str,
     device_reference: str | None = None,
 ) -> dict[str, Any]:
-    if not patient_reference.startswith(("Patient/", "Group/", "Device/", "Location/")):
-        raise ValueError("patient_reference must be a valid FHIR subject reference.")
+    patient_reference = _patient_reference(patient_reference)
     if not source_identifier.strip():
         raise ValueError("source_identifier is required for deduplication.")
     observation: dict[str, Any] = {
@@ -92,6 +98,7 @@ def neural_forecast_observation(
 
     if bool(forecast.get("abstained")):
         raise ValueError("An abstained model response cannot become a FHIR value.")
+    patient_reference = _patient_reference(patient_reference)
     anchor = datetime.fromisoformat(str(forecast["anchor_time"]).replace("Z", "+00:00"))
     if anchor.tzinfo is None:
         raise ValueError("Forecast anchor_time must include a timezone offset.")
@@ -102,6 +109,10 @@ def neural_forecast_observation(
     predicted = float(forecast["predicted_glucose_mg_dl"])
     lower = float(forecast["prediction_lower_mg_dl"])
     upper = float(forecast["prediction_upper_mg_dl"])
+    if not all(math.isfinite(value) for value in (predicted, lower, upper)):
+        raise ValueError("Forecast values and interval bounds must be finite.")
+    if lower > predicted or predicted > upper:
+        raise ValueError("Forecast interval must satisfy lower <= prediction <= upper.")
     identity = "|".join(
         (
             patient_reference,

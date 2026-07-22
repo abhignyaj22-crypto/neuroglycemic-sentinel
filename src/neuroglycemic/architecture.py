@@ -273,7 +273,9 @@ def run_neural_architecture_case(
     checkpoint = checkpoint.resolve()
     if not checkpoint.is_relative_to(allowed_root):
         raise ValueError("checkpoint_path must stay inside the selected runtime workspace.")
-    service = NeuralGlucoseService.from_checkpoint(checkpoint)
+    service = NeuralGlucoseService.from_checkpoint(
+        checkpoint, allow_research_only=True
+    )
     response = service.forecast(request)
     response_values = response.as_dict()
     modality_evidence = tuple(
@@ -313,9 +315,10 @@ def run_neural_architecture_case(
             "This is a research glucose forecast, not a diagnosis or dosing recommendation.",
             "Stress, anxiety, and depression require separately observed clinical labels and held-out metrics.",
         ),
-        release_status="research_only_do_not_deploy",
+        release_status=response.release_status,
         metadata={
             "model_version": response.model_version,
+            "release_status": response.release_status,
             "checkpoint_schema_version": response.checkpoint_schema_version,
             "feature_schema_version": response.feature_schema_version,
             "horizon_minutes": response.horizon_minutes,
@@ -336,8 +339,9 @@ def run_neural_architecture_case(
             "feature_schema_version": response.feature_schema_version,
             "checkpoint_schema_version": response.checkpoint_schema_version,
             "model_version": response.model_version,
+            "release_status": response.release_status,
             "llm_is_post_inference_only": True,
-            "release_recommendation": "research_only_do_not_deploy",
+            "release_recommendation": response.release_status,
         },
         "request_context": {
             "patient_id": request.patient_id,

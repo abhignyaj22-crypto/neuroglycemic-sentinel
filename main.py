@@ -1,4 +1,5 @@
 import argparse
+import difflib
 import json
 import os
 from pathlib import Path
@@ -25,6 +26,39 @@ def _require_external_runtime_path(
     if resolved == PROJECT_ROOT or PROJECT_ROOT in resolved.parents:
         parser.error(f"{label} must be outside the software repository: {resolved}")
     return resolved
+
+
+def _missing_file_message(path: Path, *, label: str) -> str:
+    """Return an actionable missing-file error, including a close sibling match.
+
+    The CLI previously reported only the invalid path.  A one-character typo such
+    as ``mimiv`` instead of ``mimiciv`` therefore looked like a model failure even
+    though training artifacts were valid.  Suggestions are restricted to the
+    requested parent directory; the CLI never searches protected data globally.
+    """
+
+    message = f"{label} does not exist or is not a file: {path}"
+    parent = path.parent
+    if not parent.is_dir():
+        return message
+    candidates = sorted(value.name for value in parent.iterdir() if value.is_file())
+    matches = difflib.get_close_matches(path.name, candidates, n=1, cutoff=0.65)
+    if matches:
+        message += f"\nDid you mean: {parent / matches[0]}"
+    return message
+
+
+def _atomic_write_csv(frame: pd.DataFrame, destination: Path, **kwargs: object) -> None:
+    """Write a table atomically so interrupted cohort builds cannot look complete."""
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_suffix(destination.suffix + ".tmp")
+    try:
+        frame.to_csv(temporary, index=False, **kwargs)
+        os.replace(temporary, destination)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
 
 from src.cogwear_study.config import load_config
 from src.cogwear_study.data import (
@@ -58,6 +92,8 @@ NEURAL_AND_INTEROPERABILITY_COMMANDS = (
     "prepare-lsl-glucose",
     "prepare-mimic-neural",
     "prepare-diatrend",
+    "prepare-big-ideas",
+    "prepare-physiocgm",
     "train-neural",
     "evaluate-neural",
     "neural-case",
@@ -617,6 +653,16 @@ def run_neural_train(
     train = split_frame.loc[split_frame["split"] == "train"].copy()
     validation = split_frame.loc[split_frame["split"] == "validation"].copy()
     test = split_frame.loc[split_frame["split"] == "test"].copy()
+    availability_columns = [f"{name}_available" for name in feature_names]
+    paired_training_rows = int(
+        train[availability_columns].astype(bool).sum(axis=1).ge(2).sum()
+    )
+    if len(feature_names) > 1 and paired_training_rows == 0:
+        raise ValueError(
+            "Learned multimodal fusion requires at least one training row with two "
+            "simultaneously observed modalities. Train modality-specific encoders "
+            "separately until a same-patient bridge cohort is available."
+        )
     feature_standardizer = TrainOnlyFeatureStandardizer.fit(train, feature_names)
     target_values = torch.tensor(
         train[
@@ -800,8 +846,72 @@ def run_neural_train(
         for value in metrics["by_horizon"].values()
         if "paired_patient_bootstrap_model_minus_persistence" in value
     ]
+    performance_gate_passed = bool(
+        comparison_results
+        and all(
+            int(value["patients"]) >= 5
+            and np.isfinite(float(value["upper_95"]))
+            and float(value["upper_95"]) < 0.0
+            for value in comparison_results
+        )
+    )
+    event_support_gate_passed = bool(
+        metrics["by_horizon"]
+        and all(
+            bool(horizon_metrics[event_name]["minimum_support_met"])
+            for horizon_metrics in metrics["by_horizon"].values()
+            for event_name in ("hypoglycemia_event", "hyperglycemia_event")
+        )
+    )
+    interval_calibration_descriptive_gate_passed = bool(
+        metrics["by_horizon"]
+        and all(
+            abs(
+                float(
+                    horizon_metrics["prediction_interval_95_coverage_error"]
+                )
+            )
+            <= 0.05
+            for horizon_metrics in metrics["by_horizon"].values()
+        )
+    )
+    learning_gate_passed = bool(
+        result.best_epoch >= 1
+        and result.best_validation_loss < result.initial_validation_loss
+        and parameter_delta_l2 > 0.0
+        and history["train_gradient_norm"].gt(0.0).all()
+        and len(history) > 1
+        and history["train_loss"].iloc[1:].min() < history["train_loss"].iloc[0]
+    )
+    multimodal_bridge_gate_passed = bool(
+        len(feature_names) >= 2 and paired_training_rows > 0
+    )
+    prospective_validation_gate_passed = False
+    release_blockers: list[str] = []
+    if not performance_gate_passed:
+        release_blockers.append(
+            "Patient-macro superiority over persistence was not established at every horizon."
+        )
+    if not event_support_gate_passed:
+        release_blockers.append(
+            "Held-out hypo/hyperglycemia event counts are below the minimum support floor."
+        )
+    if not multimodal_bridge_gate_passed:
+        release_blockers.append(
+            "No same-patient multimodal bridge cohort was used for learned fusion."
+        )
+    if not prospective_validation_gate_passed:
+        release_blockers.append(
+            "Prospective external validation has not been completed."
+        )
     acceptance = {
         "trained_checkpoint_epoch_at_least_one": result.best_epoch >= 1,
+        "initial_validation_loss": result.initial_validation_loss,
+        "best_validation_loss": result.best_validation_loss,
+        "validation_improved_over_epoch_zero": (
+            result.best_validation_loss < result.initial_validation_loss
+        ),
+        "paired_multimodal_training_rows": paired_training_rows,
         "parameter_delta_l2": parameter_delta_l2,
         "parameters_changed": parameter_delta_l2 > 0.0,
         "all_reported_gradient_norms_positive": bool(
@@ -811,17 +921,24 @@ def run_neural_train(
             len(history) > 1
             and history["train_loss"].iloc[1:].min() < history["train_loss"].iloc[0]
         ),
-        "all_horizons_beat_persistence_with_patient_clustered_95_ci": bool(
-            comparison_results
-            and all(
-                int(value["patients"]) >= 5
-                and np.isfinite(float(value["upper_95"]))
-                and float(value["upper_95"]) < 0.0
-                for value in comparison_results
-            )
+        "learning_gate_passed": learning_gate_passed,
+        "all_horizons_beat_persistence_with_patient_macro_95_ci": (
+            performance_gate_passed
         ),
+        # Retained for consumers of the first product contract. The estimand is
+        # now explicitly patient-macro in the metrics payload.
+        "all_horizons_beat_persistence_with_patient_clustered_95_ci": (
+            performance_gate_passed
+        ),
+        "event_support_gate_passed": event_support_gate_passed,
+        "interval_calibration_descriptive_gate_passed": (
+            interval_calibration_descriptive_gate_passed
+        ),
+        "multimodal_bridge_gate_passed": multimodal_bridge_gate_passed,
+        "prospective_validation_gate_passed": prospective_validation_gate_passed,
         "clinical_release_ready": False,
-        "release_recommendation": "research_only_requires_external_bridge_cohort",
+        "release_blockers": release_blockers,
+        "release_recommendation": "research_only_not_for_clinical_use",
     }
     ablation_scenarios = modality_ablation_predictions(
         model,
@@ -851,6 +968,60 @@ def run_neural_train(
     _save_json(output_dir / "test_metrics.json", metrics)
     _save_json(output_dir / "feature_schema.json", serving_feature_schema)
     _save_json(output_dir / "training_acceptance.json", acceptance)
+    from src.neuroglycemic.release import write_release_manifest
+
+    release_status = (
+        "approved" if acceptance["clinical_release_ready"] else "research_only"
+    )
+    release_manifest = write_release_manifest(
+        result.checkpoint_path,
+        status=release_status,
+        patient_disjoint_evaluation=True,
+        cohorts=tuple(sorted(frame["cohort_id"].astype(str).unique())),
+        decision_reasons=(
+            (
+                "Neural optimization improved on the epoch-zero validation baseline."
+                if acceptance["learning_gate_passed"]
+                else "Neural proof-of-learning requirements were not all satisfied."
+            ),
+            (
+                "All forecast horizons beat persistence with patient-macro "
+                "95% confidence intervals."
+                if acceptance[
+                    "all_horizons_beat_persistence_with_patient_macro_95_ci"
+                ]
+                else "Persistence superiority was not established at every horizon."
+            ),
+            *tuple(acceptance["release_blockers"]),
+        ),
+        metrics_file=str((output_dir / "test_metrics.json").resolve()),
+    )
+    from src.neuroglycemic.reporting import (
+        build_neural_model_card,
+        write_neural_model_card,
+    )
+
+    model_card = build_neural_model_card(
+        prediction_target=config.prediction_target,
+        horizons_minutes=config.forecast_horizons_minutes,
+        modalities=tuple(feature_names),
+        cohorts=tuple(sorted(frame["cohort_id"].astype(str).unique())),
+        split_counts={
+            str(row["split"]): {
+                "rows": int(row["rows"]),
+                "patients": int(row["patients"]),
+            }
+            for row in split_audit.to_dict(orient="records")
+        },
+        metrics=metrics,
+        acceptance=acceptance,
+        checkpoint_path=result.checkpoint_path,
+        release_manifest_path=release_manifest,
+        data_sha256=source_digest,
+    )
+    model_card_path = write_neural_model_card(
+        output_dir / "model_card.json", model_card
+    )
     from src.neuroglycemic.figures import (
         save_forecast_figure,
         save_fusion_weight_figure,
@@ -862,10 +1033,13 @@ def run_neural_train(
     save_forecast_figure(predictions, figure_dir / "held_out_forecasts.png")
     save_fusion_weight_figure(predictions, figure_dir / "fusion_weights.png")
     print(f"\nSaved neural study artifacts to: {output_dir}")
+    print(f"Saved auditable model card to: {model_card_path}")
     return {
         "metrics": metrics,
         "acceptance": acceptance,
         "checkpoint": str(result.checkpoint_path),
+        "release_manifest": str(release_manifest),
+        "model_card": str(model_card_path),
     }
 
 
@@ -898,6 +1072,9 @@ def run_neural_evaluate(
 
     config = load_neural_training_config(config_path)
     destination = checkpoint_path or config.checkpoint_path
+    from src.neuroglycemic.release import load_release_manifest
+
+    release = load_release_manifest(destination)
     payload = _load_checkpoint_payload(destination)
     stored_training_config = payload.get("training_config")
     if stored_training_config != config.checkpoint_values():
@@ -979,13 +1156,69 @@ def run_neural_evaluate(
     print("\nRELOADED CHECKPOINT METRICS")
     print(json.dumps(_json_safe(metrics), indent=2, allow_nan=False))
     print_frame("RELOADED PAIRED MISSING-MODALITY ABLATIONS", ablation)
+    original_predictions_path = output_dir / "test_predictions.csv"
+    original_predictions_available = original_predictions_path.is_file()
+    maximum_prediction_difference: float | None = None
+    row_contract_matches: bool | None = None
+    if original_predictions_available:
+        original = pd.read_csv(original_predictions_path)
+        identity_columns = [
+            name
+            for name in (
+                "participant_key",
+                "patient_id",
+                "anchor_time",
+                "horizon_minutes",
+            )
+            if name in original.columns and name in predictions.columns
+        ]
+        row_contract_matches = bool(
+            len(original) == len(predictions)
+            and identity_columns
+            and original[identity_columns].astype(str).equals(
+                predictions[identity_columns].astype(str)
+            )
+        )
+        if row_contract_matches:
+            maximum_prediction_difference = float(
+                np.max(
+                    np.abs(
+                        original["predicted_glucose_mg_dl"].to_numpy(float)
+                        - predictions["predicted_glucose_mg_dl"].to_numpy(float)
+                    )
+                )
+            )
+    reproducibility = {
+        "checkpoint_sha256_verified": True,
+        "release_status": release.status,
+        "data_sha256_matches_checkpoint": True,
+        "training_config_matches_checkpoint": True,
+        "patient_split_restored_from_checkpoint": True,
+        "original_prediction_artifact_available": original_predictions_available,
+        "row_contract_matches_original": row_contract_matches,
+        "maximum_absolute_prediction_difference_mg_dl": (
+            maximum_prediction_difference
+        ),
+        "deterministic_reproduction_passed": (
+            None
+            if maximum_prediction_difference is None
+            else maximum_prediction_difference <= 1e-6
+        ),
+    }
+    print("\nCHECKPOINT REPRODUCIBILITY AUDIT")
+    print(json.dumps(_json_safe(reproducibility), indent=2, allow_nan=False))
     output_dir.mkdir(parents=True, exist_ok=True)
     predictions.to_csv(output_dir / "reloaded_test_predictions.csv", index=False)
     ablation.to_csv(
         output_dir / "reloaded_missing_modality_ablation.csv", index=False
     )
     _save_json(output_dir / "reloaded_test_metrics.json", metrics)
-    return {"metrics": metrics, "checkpoint": str(destination)}
+    _save_json(output_dir / "evaluation_reproducibility.json", reproducibility)
+    return {
+        "metrics": metrics,
+        "checkpoint": str(destination),
+        "reproducibility": reproducibility,
+    }
 
 
 def cli() -> None:
@@ -1056,12 +1289,23 @@ def cli() -> None:
         "--source-dir",
         type=Path,
         default=None,
-        help="Directory containing controlled-access DiaTrend workbooks.",
+        help="External directory containing the selected source dataset.",
     )
     parser.add_argument(
         "--source-timezone",
         default=None,
-        help="IANA timezone for DiaTrend's timezone-naive device timestamps.",
+        help="IANA timezone for timezone-naive source-device timestamps.",
+    )
+    parser.add_argument(
+        "--clock-uncertainty-ms",
+        type=float,
+        default=60000.0,
+        help="Declared retrospective source-clock uncertainty in milliseconds.",
+    )
+    parser.add_argument(
+        "--trust-pickle",
+        action="store_true",
+        help="Allow verified official PhysioCGM pickle files to be loaded.",
     )
     parser.add_argument("--run-name", default="neuroglycemic-v4")
     parser.add_argument(
@@ -1160,7 +1404,6 @@ def cli() -> None:
         from src.neuroglycemic.lsl import audit_xdf, discover_streams
 
         if arguments.xdf is None:
-            print_frame("DISCOVERED LSL STREAMS", discover_streams())
             discovered = discover_streams()
             print_frame("DISCOVERED LSL STREAMS", discovered)
             if discovered.empty:
@@ -1176,9 +1419,7 @@ def cli() -> None:
                 parser=parser,
             )
             if not xdf_path.is_file():
-                parser.error(
-                    f"LabRecorder XDF does not exist or is not a file: {xdf_path}"
-                )
+                parser.error(_missing_file_message(xdf_path, label="LabRecorder XDF"))
             audit, _ = audit_xdf(xdf_path)
             print_frame("LABRECORDER XDF STREAM AUDIT", audit)
         return
@@ -1205,13 +1446,10 @@ def cli() -> None:
             parser=parser,
         )
         if not xdf_path.is_file():
-            parser.error(
-                f"LabRecorder XDF does not exist or is not a file: {xdf_path}"
-            )
+            parser.error(_missing_file_message(xdf_path, label="LabRecorder XDF"))
         if not manifest_path.is_file():
             parser.error(
-                "LSL window manifest does not exist or is not a file: "
-                f"{manifest_path}"
+                _missing_file_message(manifest_path, label="LSL window manifest")
             )
         workspace = ResearchWorkspace.create(
             arguments.workspace, repository_root=PROJECT_ROOT
@@ -1286,10 +1524,123 @@ def cli() -> None:
         windows = prepare_mimic_neural_file(arguments.data)
         print_frame("CAUSAL MIMIC-IV DEMO NEURAL WINDOWS", windows)
         destination = workspace.aligned / "mimiciv_demo_neural_windows.csv.gz"
+        if destination.exists() and not arguments.rebuild:
+            parser.error(
+                f"Refusing to overwrite existing aligned cohort: {destination}\n"
+                "Re-run with --rebuild only after verifying the source cohort."
+            )
+        _atomic_write_csv(windows, destination, compression="gzip")
+        print(f"\nSaved external MIMIC neural cohort: {destination}")
+        return
+
+    if arguments.study == "prepare-big-ideas":
+        from src.neuroglycemic.big_ideas_data import (
+            BigIdeasBuildConfig,
+            big_ideas_build_manifest,
+            build_big_ideas_dataset,
+            discover_big_ideas_patients,
+        )
+        from src.neuroglycemic.workspace import ResearchWorkspace
+
+        if arguments.workspace is None or arguments.source_dir is None:
+            parser.error("prepare-big-ideas requires --workspace and --source-dir.")
+        if not arguments.source_timezone:
+            parser.error("prepare-big-ideas requires --source-timezone.")
+        source_root = _require_external_runtime_path(
+            arguments.source_dir,
+            label="Big Ideas source data",
+            parser=parser,
+        )
+        workspace = ResearchWorkspace.create(
+            arguments.workspace, repository_root=PROJECT_ROOT
+        )
+        build_config = BigIdeasBuildConfig(
+            source_timezone=arguments.source_timezone,
+            clock_uncertainty_ms=arguments.clock_uncertainty_ms,
+        )
+        windows, audit = build_big_ideas_dataset(
+            discover_big_ideas_patients(source_root), config=build_config
+        )
+        print_frame("BIG IDEAS SOURCE AUDIT", audit)
+        print_frame("BIG IDEAS CAUSAL WEARABLE/CGM WINDOWS", windows)
+        destination = workspace.aligned / "big_ideas_wearable_cgm_windows.csv.gz"
         if destination.exists():
             parser.error(f"Refusing to overwrite existing aligned cohort: {destination}")
         windows.to_csv(destination, index=False, compression="gzip")
-        print(f"\nSaved external MIMIC neural cohort: {destination}")
+        audit.to_csv(workspace.canonical / "big_ideas_ingestion_audit.csv", index=False)
+        _save_json(
+            workspace.canonical / "big_ideas_build_manifest.json",
+            big_ideas_build_manifest(
+                windows, source_root=source_root, config=build_config
+            ),
+        )
+        generated_config = workspace.canonical / "big_ideas_neural.json"
+        _save_json(
+            generated_config,
+            json.loads(
+                (PROJECT_ROOT / "config" / "big_ideas_neural.json").read_text(
+                    encoding="utf-8"
+                )
+            ),
+        )
+        print(f"\nSaved aligned Big Ideas cohort outside Git: {destination}")
+        print(f"Generated matching neural config: {generated_config}")
+        return
+
+    if arguments.study == "prepare-physiocgm":
+        from src.neuroglycemic.physiocgm_data import (
+            build_physiocgm_aligned_windows,
+            write_physiocgm_build,
+        )
+        from src.neuroglycemic.workspace import ResearchWorkspace
+
+        if arguments.workspace is None or arguments.source_dir is None:
+            parser.error("prepare-physiocgm requires --workspace and --source-dir.")
+        if not arguments.source_timezone:
+            parser.error("prepare-physiocgm requires --source-timezone.")
+        if not arguments.trust_pickle:
+            parser.error(
+                "prepare-physiocgm requires --trust-pickle after verifying the official files."
+            )
+        source_root = _require_external_runtime_path(
+            arguments.source_dir,
+            label="PhysioCGM processed source data",
+            parser=parser,
+        )
+        workspace = ResearchWorkspace.create(
+            arguments.workspace, repository_root=PROJECT_ROOT
+        )
+        horizons = (30, 60)
+        result = build_physiocgm_aligned_windows(
+            source_root,
+            horizons_minutes=horizons,
+            source_timezone=arguments.source_timezone,
+            trust_pickle=True,
+            clock_uncertainty_ms=arguments.clock_uncertainty_ms,
+        )
+        print_frame("PHYSIOCGM SOURCE AUDIT", result.audit)
+        print_frame("PHYSIOCGM CAUSAL WEARABLE/CGM WINDOWS", result.frame)
+        destination = workspace.aligned / "physiocgm_wearable_cgm_windows.csv.gz"
+        if destination.exists():
+            parser.error(f"Refusing to overwrite existing aligned cohort: {destination}")
+        write_physiocgm_build(
+            result,
+            destination,
+            input_dir=source_root,
+            horizons_minutes=horizons,
+            source_timezone=arguments.source_timezone,
+        )
+        generated_config = workspace.canonical / "physiocgm_neural.json"
+        _save_json(
+            generated_config,
+            json.loads(
+                (PROJECT_ROOT / "config" / "neural_glucose_physio.json").read_text(
+                    encoding="utf-8"
+                )
+            ),
+        )
+        print(f"\nSaved aligned PhysioCGM cohort outside Git: {destination}")
+        print(f"Generated matching neural config: {generated_config}")
         return
 
     if arguments.study == "prepare-diatrend":
@@ -1431,8 +1782,9 @@ def cli() -> None:
         )
         if not data_path.is_file():
             parser.error(
-                "Neural training/evaluation data does not exist or is not a file: "
-                f"{data_path}"
+                _missing_file_message(
+                    data_path, label="Neural training/evaluation data"
+                )
             )
         workspace = ResearchWorkspace.create(
             arguments.workspace, repository_root=PROJECT_ROOT
@@ -1441,7 +1793,7 @@ def cli() -> None:
         neural_config = neural_config.expanduser().resolve()
         if not neural_config.is_file():
             parser.error(
-                f"Neural configuration does not exist or is not a file: {neural_config}"
+                _missing_file_message(neural_config, label="Neural configuration")
             )
         print(f"Software repository: {PROJECT_ROOT}")
         print(f"External workspace: {workspace.root}")

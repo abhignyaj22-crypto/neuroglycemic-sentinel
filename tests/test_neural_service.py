@@ -17,6 +17,7 @@ from src.neuroglycemic.service import (  # noqa: E402
     NeuralGlucoseService,
     build_neural_checkpoint_metadata,
 )
+from src.neuroglycemic.release import write_release_manifest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -84,6 +85,13 @@ def _checkpoint(tmp_path: Path, *, metadata: bool = True) -> Path:
         ),
         metadata=serving_metadata,
     )
+    write_release_manifest(
+        config.checkpoint_path,
+        status="research_only",
+        patient_disjoint_evaluation=True,
+        cohorts=("unit-test-fixture",),
+        decision_reasons=("Software contract test only; no research claim.",),
+    )
     return config.checkpoint_path
 
 
@@ -113,10 +121,13 @@ def _request(
 def test_checkpoint_service_runs_neural_forward_and_masks_missing_eeg(
     tmp_path: Path,
 ) -> None:
-    service = NeuralGlucoseService.from_checkpoint(_checkpoint(tmp_path))
+    service = NeuralGlucoseService.from_checkpoint(
+        _checkpoint(tmp_path), allow_research_only=True
+    )
     response = service.forecast(_request())
 
     assert response.abstained is False
+    assert response.release_status == "research_only"
     assert response.prediction_target == "future_cgm_glucose_mg_dl"
     assert response.horizon_minutes == 60
     assert response.predicted_glucose_mg_dl is not None
@@ -135,10 +146,19 @@ def test_checkpoint_service_runs_neural_forward_and_masks_missing_eeg(
     assert response.as_dict()["learned_weights"]["wearable"] > 0
 
 
+def test_service_rejects_research_checkpoint_without_explicit_opt_in(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="research-only"):
+        NeuralGlucoseService.from_checkpoint(_checkpoint(tmp_path))
+
+
 def test_service_rejects_untrained_contracts_and_caller_selected_horizons(
     tmp_path: Path,
 ) -> None:
-    service = NeuralGlucoseService.from_checkpoint(_checkpoint(tmp_path))
+    service = NeuralGlucoseService.from_checkpoint(
+        _checkpoint(tmp_path), allow_research_only=True
+    )
     with pytest.raises(ValueError, match="Unsupported horizon"):
         service.forecast(_request(horizon_minutes=45))
     with pytest.raises(ValueError, match="feature schema version"):
@@ -146,13 +166,15 @@ def test_service_rejects_untrained_contracts_and_caller_selected_horizons(
 
     incomplete = _checkpoint(tmp_path / "incomplete", metadata=False)
     with pytest.raises(ValueError, match="model_spec"):
-        NeuralGlucoseService.from_checkpoint(incomplete)
+        NeuralGlucoseService.from_checkpoint(incomplete, allow_research_only=True)
 
 
 def test_service_abstains_instead_of_returning_a_default_glucose(
     tmp_path: Path,
 ) -> None:
-    service = NeuralGlucoseService.from_checkpoint(_checkpoint(tmp_path))
+    service = NeuralGlucoseService.from_checkpoint(
+        _checkpoint(tmp_path), allow_research_only=True
+    )
     response = service.forecast(
         _request(availability={"eeg": False, "wearable": False, "ehr": False})
     )
@@ -169,7 +191,9 @@ def test_neural_case_study_uses_checkpoint_not_cached_prediction_artifacts(
 ) -> None:
     checkpoint = _checkpoint(tmp_path)
     request = _request()
-    expected = NeuralGlucoseService.from_checkpoint(checkpoint).forecast(request)
+    expected = NeuralGlucoseService.from_checkpoint(
+        checkpoint, allow_research_only=True
+    ).forecast(request)
 
     result = run_neural_architecture_case(
         tmp_path,

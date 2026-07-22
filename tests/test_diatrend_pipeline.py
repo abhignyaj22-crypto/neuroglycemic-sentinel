@@ -340,3 +340,23 @@ def test_fhir_keeps_sensor_measurements_distinct_from_model_forecasts() -> None:
     )
     assert forecast["status"] == "preliminary"
     assert forecast["code"]["coding"][0]["code"] == "future-glucose"
+
+    with pytest.raises(ValueError, match="Patient/<id>"):
+        cgm_sensor_observation(
+            patient_reference="Device/not-a-patient",
+            effective_time="2026-01-01T12:00:00-06:00",
+            glucose_mg_dl=121.0,
+            source_identifier="invalid-subject",
+        )
+    with pytest.raises(ValueError, match="lower <= prediction <= upper"):
+        neural_forecast_observation(
+            {
+                "anchor_time": "2026-01-01T12:00:00-06:00",
+                "horizon_minutes": 60,
+                "predicted_glucose_mg_dl": 135.0,
+                "prediction_lower_mg_dl": 150.0,
+                "prediction_upper_mg_dl": 170.0,
+                "abstained": False,
+            },
+            patient_reference="Patient/123",
+        )

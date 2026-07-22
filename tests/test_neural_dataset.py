@@ -214,6 +214,23 @@ def test_full_neural_data_path_updates_the_real_mixture_model_and_reloads(
     assert payload["metadata"]["model_version"] == "neuroglycemic-neural-v2"
     assert payload["metadata"]["model_spec"]["min_scale"] == pytest.approx(0.05)
     assert payload["metadata"]["feature_schema"]["fit_split"] == "train"
+    model_card_path = output_dir / "model_card.json"
+    assert model_card_path.exists()
+    model_card = json.loads(model_card_path.read_text(encoding="utf-8"))
+    assert model_card["release_status"] == "research_only"
+    assert "insulin or medication dosing" in model_card["prohibited_use"]
+    from scripts.build_neural_case_request import build_request
+
+    held_out_request = build_request(
+        checkpoint,
+        data_path,
+        row_index=0,
+        horizon_minutes=30,
+        split="test",
+        allow_research_only=True,
+    )
+    held_out_key = f"paired_bridge_cohort::{held_out_request['patient_id']}"
+    assert held_out_key in payload["metadata"]["patient_split"]["test"]
     run_neural_evaluate(
         data_path=data_path,
         config_path=config_path,
@@ -229,6 +246,7 @@ def test_full_neural_data_path_updates_the_real_mixture_model_and_reloads(
         assert horizon_metrics["prediction_coverage"] == pytest.approx(1.0)
         assert np.isfinite(horizon_metrics["hypoglycemia_event"]["brier_score"])
         assert np.isfinite(horizon_metrics["hyperglycemia_event"]["brier_score"])
+        assert "prediction_interval_95_coverage_error" in horizon_metrics
     prediction_columns = pd.read_csv(
         output_dir / "reloaded_test_predictions.csv", nrows=0
     ).columns
@@ -241,4 +259,9 @@ def test_full_neural_data_path_updates_the_real_mixture_model_and_reloads(
     all_unavailable = ablation.loc[ablation["scenario"].eq("all_unavailable")]
     assert not all_unavailable.empty
     assert all_unavailable["abstention_rate"].eq(1.0).all()
+    reproducibility = json.loads(
+        (output_dir / "evaluation_reproducibility.json").read_text(encoding="utf-8")
+    )
+    assert reproducibility["checkpoint_sha256_verified"] is True
+    assert reproducibility["deterministic_reproduction_passed"] is True
     assert "NEURAL TRAINING AND VALIDATION LOSSES" in capsys.readouterr().out

@@ -42,11 +42,43 @@ def build_request(
     *,
     row_index: int,
     horizon_minutes: int | None,
+    split: str = "all",
+    allow_research_only: bool = False,
 ) -> dict[str, object]:
-    service = NeuralGlucoseService.from_checkpoint(checkpoint)
+    service = NeuralGlucoseService.from_checkpoint(
+        checkpoint, allow_research_only=allow_research_only
+    )
     frame = _read_table(data)
+    if split != "all":
+        import torch
+
+        try:
+            payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
+        except TypeError:  # pragma: no cover - compatibility with older PyTorch.
+            payload = torch.load(checkpoint, map_location="cpu")
+        patient_split = payload.get("metadata", {}).get("patient_split", {})
+        selected = patient_split.get(split)
+        if not isinstance(selected, (list, tuple)) or not selected:
+            raise ValueError(
+                f"Checkpoint does not contain a non-empty {split!r} patient split."
+            )
+        if "cohort_id" in frame:
+            participant_key = (
+                frame["cohort_id"].astype(str) + "::" + frame["patient_id"].astype(str)
+            )
+        else:
+            participant_key = frame["patient_id"].astype(str)
+        frame = frame.loc[
+            participant_key.isin({str(value) for value in selected})
+        ].reset_index(drop=True)
+        if frame.empty:
+            raise ValueError(
+                f"Aligned data has no patients from the checkpoint {split!r} split."
+            )
     if row_index < 0 or row_index >= len(frame):
-        raise IndexError(f"row_index must be in [0, {len(frame) - 1}].")
+        raise IndexError(
+            f"row_index must be in [0, {len(frame) - 1}] after {split!r} filtering."
+        )
     row = frame.iloc[row_index]
     horizon = horizon_minutes or service.supported_horizons_minutes[0]
     if horizon not in service.supported_horizons_minutes:
@@ -109,6 +141,20 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--row-index", type=int, default=0)
     parser.add_argument("--horizon-minutes", type=int, default=None)
+    parser.add_argument(
+        "--split",
+        choices=("all", "train", "validation", "test"),
+        default="all",
+        help=(
+            "Select a checkpoint-recorded patient split before --row-index. "
+            "Use --split test for a held-out case study."
+        ),
+    )
+    parser.add_argument(
+        "--research-only",
+        action="store_true",
+        help="Explicitly allow a research_only checkpoint release manifest.",
+    )
     arguments = parser.parse_args()
     if arguments.output.exists():
         parser.error(f"Refusing to overwrite {arguments.output}.")
@@ -117,6 +163,8 @@ def main() -> None:
         arguments.data,
         row_index=arguments.row_index,
         horizon_minutes=arguments.horizon_minutes,
+        split=arguments.split,
+        allow_research_only=arguments.research_only,
     )
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     arguments.output.write_text(

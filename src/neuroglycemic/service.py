@@ -17,6 +17,7 @@ from .neural_training import (
     inverse_transform_neuroglycemic_outputs,
     load_neural_checkpoint,
 )
+from .release import load_release_manifest
 
 
 @dataclass(frozen=True)
@@ -167,6 +168,7 @@ class NeuralGlucoseForecastResponse:
     feature_schema_version: str
     checkpoint_schema_version: str
     model_version: str
+    release_status: str
     predicted_glucose_mg_dl: float | None
     prediction_sd_mg_dl: float | None
     prediction_lower_mg_dl: float | None
@@ -189,6 +191,7 @@ class NeuralGlucoseForecastResponse:
             "feature_schema_version": self.feature_schema_version,
             "checkpoint_schema_version": self.checkpoint_schema_version,
             "model_version": self.model_version,
+            "release_status": self.release_status,
             "predicted_glucose_mg_dl": self.predicted_glucose_mg_dl,
             "prediction_sd_mg_dl": self.prediction_sd_mg_dl,
             "prediction_lower_mg_dl": self.prediction_lower_mg_dl,
@@ -389,6 +392,7 @@ class NeuralGlucoseService:
         target_standardizer: GlucoseTargetStandardizer,
         feature_schema: _FeatureSchema,
         model_version: str,
+        release_status: str,
         hypoglycemia_threshold_mg_dl: float,
         hyperglycemia_threshold_mg_dl: float,
         input_cgm: bool,
@@ -400,6 +404,7 @@ class NeuralGlucoseService:
         self.target_standardizer = target_standardizer
         self.feature_schema = feature_schema
         self.model_version = model_version
+        self.release_status = release_status
         self.hypoglycemia_threshold_mg_dl = hypoglycemia_threshold_mg_dl
         self.hyperglycemia_threshold_mg_dl = hyperglycemia_threshold_mg_dl
         self.input_cgm = bool(input_cgm)
@@ -418,6 +423,8 @@ class NeuralGlucoseService:
         expected_prediction_target: str | None = None,
         expected_feature_schema_version: str = NEURAL_FEATURE_SCHEMA,
         device: str | torch.device = "cpu",
+        release_manifest_path: Path | None = None,
+        allow_research_only: bool = False,
     ) -> "NeuralGlucoseService":
         """Reconstruct a model only when its complete serving contract matches."""
 
@@ -425,6 +432,16 @@ class NeuralGlucoseService:
         payload = _trusted_torch_load(Path(checkpoint_path), resolved_device)
         if payload.get("schema_version") != CHECKPOINT_SCHEMA:
             raise ValueError("Unsupported neural checkpoint schema.")
+        release = load_release_manifest(
+            Path(checkpoint_path), manifest_path=release_manifest_path
+        )
+        if release.status == "rejected":
+            raise ValueError("The model release manifest rejects this checkpoint.")
+        if release.status == "research_only" and not allow_research_only:
+            raise ValueError(
+                "This checkpoint is research-only. Pass allow_research_only=True "
+                "only from an explicitly labelled research workflow."
+            )
         training_config = payload.get("training_config")
         metadata = payload.get("metadata")
         if not isinstance(training_config, dict) or not isinstance(metadata, dict):
@@ -548,6 +565,7 @@ class NeuralGlucoseService:
             target_standardizer=standardizer,
             feature_schema=feature_schema,
             model_version=str(metadata.get("model_version", "unversioned")),
+            release_status=release.status,
             hypoglycemia_threshold_mg_dl=hypoglycemia_threshold,
             hyperglycemia_threshold_mg_dl=hyperglycemia_threshold,
             input_cgm=input_cgm,
@@ -793,6 +811,7 @@ class NeuralGlucoseService:
             feature_schema_version=self.feature_schema.version,
             checkpoint_schema_version=CHECKPOINT_SCHEMA,
             model_version=self.model_version,
+            release_status=self.release_status,
             predicted_glucose_mg_dl=predicted,
             prediction_sd_mg_dl=standard_deviation,
             prediction_lower_mg_dl=lower,

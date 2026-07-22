@@ -12,6 +12,20 @@ from .neural_dataset import target_column, target_time_column
 
 
 PHYSIOCGM_COHORT_ID = "PhysioCGM-2025"
+PHYSIOCGM_WEARABLE_FEATURES = (
+    "wearable_e4_hr_mean",
+    "wearable_e4_hr_std",
+    "wearable_e4_hr_slope_per_minute",
+    "wearable_e4_hr_successive_difference_rmssd",
+    "wearable_eda_mean",
+    "wearable_eda_std",
+    "wearable_temperature_mean",
+    "wearable_temperature_std",
+    "wearable_activity_mean",
+    "wearable_activity_std",
+    "wearable_breathing_rate_mean",
+    "wearable_breathing_rate_std",
+)
 
 
 @dataclass(frozen=True)
@@ -146,7 +160,7 @@ def extract_causal_wearable_features(
     *,
     anchor: pd.Timestamp,
     source_timezone: str,
-) -> tuple[dict[str, float], float, float]:
+) -> tuple[dict[str, float], float, float, pd.Timestamp | None]:
     """Summarize only samples whose timestamps are no later than the anchor."""
 
     specifications = (
@@ -195,12 +209,13 @@ def extract_causal_wearable_features(
             latest_times.extend(times)
             features.update(values)
     quality = float(populated_streams / (len(specifications) + 2))
+    latest = max(latest_times) if latest_times else None
     staleness = (
-        max(0.0, (anchor - max(latest_times)).total_seconds() / 60.0)
-        if latest_times
+        max(0.0, (anchor - latest).total_seconds() / 60.0)
+        if latest is not None
         else 0.0
     )
-    return features, quality, float(staleness)
+    return features, quality, float(staleness), latest
 
 
 def _nearest_future_target(
@@ -233,12 +248,15 @@ def build_physiocgm_aligned_windows(
     horizon_tolerance_minutes: float = 5.0,
     source_timezone: str = "UTC",
     trust_pickle: bool = False,
+    clock_uncertainty_ms: float = 60_000.0,
 ) -> PhysioCGMBuildResult:
     if not trust_pickle:
         raise ValueError(
             "Refusing to load pickle input without trust_pickle=True. Verify the "
             "files came from the official PhysioCGM release, then use --trust-pickle."
         )
+    if not math.isfinite(clock_uncertainty_ms) or clock_uncertainty_ms < 0:
+        raise ValueError("clock_uncertainty_ms must be finite and non-negative.")
     grouped = discover_physiocgm_clips(input_dir)
     rows: list[dict[str, Any]] = []
     audits: list[dict[str, Any]] = []
@@ -253,8 +271,8 @@ def build_physiocgm_aligned_windows(
                     clip.get("Timestamp"), source_timezone=source_timezone
                 )
                 glucose = float(clip.get("glucose"))
-                if not math.isfinite(glucose) or glucose <= 0:
-                    raise ValueError("reference glucose must be finite and positive")
+                if not math.isfinite(glucose) or not 20.0 <= glucose <= 600.0:
+                    raise ValueError("reference glucose must be within 20-600 mg/dL")
                 clips.append((anchor, glucose, clip, path))
             except Exception as exc:
                 audits.append(
@@ -268,11 +286,11 @@ def build_physiocgm_aligned_windows(
         clips.sort(key=lambda value: value[0])
         anchors = [value[0] for value in clips]
         glucose_values = [value[1] for value in clips]
-        for anchor, _current_glucose, clip, path in clips:
-            features, quality, staleness = extract_causal_wearable_features(
+        for anchor, current_glucose, clip, path in clips:
+            features, quality, staleness, available_time = extract_causal_wearable_features(
                 clip, anchor=anchor, source_timezone=source_timezone
             )
-            if not features:
+            if not features or available_time is None:
                 audits.append(
                     {
                         "patient_id": patient_id,
@@ -289,9 +307,12 @@ def build_physiocgm_aligned_windows(
                 "wearable_available": True,
                 "wearable_quality": quality,
                 "wearable_staleness_minutes": staleness,
+                "wearable_available_time": available_time,
+                "wearable_clock_uncertainty_ms": float(clock_uncertainty_ms),
                 "wearable_patient_id": patient_id,
                 "wearable_cohort_id": PHYSIOCGM_COHORT_ID,
                 "wearable_anchor_time": anchor,
+                "reference_current_glucose_mg_dl": current_glucose,
                 **features,
             }
             complete = True
@@ -333,6 +354,9 @@ def build_physiocgm_aligned_windows(
             "PhysioCGM preparation produced no complete causal forecast windows. "
             "Check the processed folder, timezone, and horizon tolerance."
         )
+    for feature in PHYSIOCGM_WEARABLE_FEATURES:
+        if feature not in frame:
+            frame[feature] = np.nan
     frame = frame.sort_values(["patient_id", "anchor_time"], ignore_index=True)
     if frame.duplicated(["patient_id", "anchor_time"]).any():
         raise ValueError("PhysioCGM contains duplicate patient/anchor windows.")
@@ -372,6 +396,7 @@ def write_physiocgm_build(
         "horizons_minutes": [int(value) for value in horizons_minutes],
         "source_timezone_for_naive_timestamps": source_timezone,
         "input_cgm_used_as_feature": False,
+        "feature_registry": {"wearable": list(PHYSIOCGM_WEARABLE_FEATURES)},
     }
     output.with_name(f"{output.stem}_manifest.json").write_text(
         json.dumps(manifest, indent=2), encoding="utf-8"

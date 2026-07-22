@@ -201,13 +201,21 @@ def paired_patient_bootstrap_delta(
     seed: int = 42,
     replicates: int = 1000,
     patient_column: str = "patient_id",
-) -> dict[str, float | int]:
-    """Patient-clustered 95% CI for model MAE minus baseline MAE."""
+) -> dict[str, float | int | str]:
+    """Patient-macro bootstrap CI for model MAE minus baseline MAE.
+
+    Each patient contributes one mean absolute-error difference before
+    resampling.  This matches the patient-level estimand used by the study and
+    prevents a patient with many laboratory measurements from dominating a
+    patient with fewer observations.
+    """
 
     required = {patient_column, "target_glucose_mg_dl", model_column, baseline_column}
     missing = required - set(frame.columns)
     if missing:
         raise KeyError(f"Bootstrap frame is missing columns: {sorted(missing)}")
+    if replicates <= 0:
+        raise ValueError("replicates must be positive.")
     valid = frame[list(required)].replace([np.inf, -np.inf], np.nan).dropna()
     patients = valid[patient_column].astype(str).drop_duplicates().to_numpy()
     if patients.size < 2:
@@ -219,25 +227,31 @@ def paired_patient_bootstrap_delta(
             "upper_95": float("nan"),
         }
 
-    def delta(values: pd.DataFrame) -> float:
+    patient_deltas: list[float] = []
+    for _, values in valid.groupby(patient_column, sort=False):
         actual = values["target_glucose_mg_dl"].to_numpy(float)
         model_error = np.abs(values[model_column].to_numpy(float) - actual).mean()
-        baseline_error = np.abs(values[baseline_column].to_numpy(float) - actual).mean()
-        return float(model_error - baseline_error)
+        baseline_error = np.abs(
+            values[baseline_column].to_numpy(float) - actual
+        ).mean()
+        patient_deltas.append(float(model_error - baseline_error))
+    deltas = np.asarray(patient_deltas, dtype=float)
 
     rng = np.random.default_rng(seed)
-    samples: list[float] = []
-    for _ in range(replicates):
-        selected = rng.choice(patients, size=len(patients), replace=True)
-        pieces = [
-            valid.loc[valid[patient_column].astype(str).eq(patient)]
-            for patient in selected
-        ]
-        samples.append(delta(pd.concat(pieces, ignore_index=True)))
+    samples = rng.choice(
+        deltas, size=(int(replicates), len(deltas)), replace=True
+    ).mean(axis=1)
+    actual = valid["target_glucose_mg_dl"].to_numpy(float)
+    row_weighted_delta = float(
+        np.abs(valid[model_column].to_numpy(float) - actual).mean()
+        - np.abs(valid[baseline_column].to_numpy(float) - actual).mean()
+    )
     return {
         "patients": int(patients.size),
         "replicates": int(replicates),
-        "delta_mae_mg_dl": delta(valid),
+        "estimand": "patient_macro_mae_model_minus_baseline",
+        "delta_mae_mg_dl": float(deltas.mean()),
+        "row_weighted_delta_mae_mg_dl": row_weighted_delta,
         "lower_95": float(np.quantile(samples, 0.025)),
         "upper_95": float(np.quantile(samples, 0.975)),
     }
@@ -249,8 +263,12 @@ def prediction_interval_metrics(
     target_column: str = "target_glucose_mg_dl",
     lower_column: str = "prediction_lower_mg_dl",
     upper_column: str = "prediction_upper_mg_dl",
+    nominal_coverage: float = 0.95,
 ) -> dict[str, float | int]:
-    """Return empirical coverage and width on finite prediction intervals."""
+    """Return coverage, sharpness, and interval score on finite intervals."""
+
+    if not 0.0 < nominal_coverage < 1.0:
+        raise ValueError("nominal_coverage must be strictly between zero and one.")
 
     required = {target_column, lower_column, upper_column}
     missing = required - set(frame.columns)
@@ -264,12 +282,30 @@ def prediction_interval_metrics(
         raise ValueError("No finite target intervals are available.")
     if np.any(lower[valid] > upper[valid]):
         raise ValueError("Prediction interval lower bounds cannot exceed upper bounds.")
+    valid_actual = actual[valid]
+    valid_lower = lower[valid]
+    valid_upper = upper[valid]
+    covered = (valid_actual >= valid_lower) & (valid_actual <= valid_upper)
+    width = valid_upper - valid_lower
+    alpha = 1.0 - nominal_coverage
+    interval_score = width.copy()
+    below = valid_actual < valid_lower
+    above = valid_actual > valid_upper
+    interval_score[below] += (2.0 / alpha) * (
+        valid_lower[below] - valid_actual[below]
+    )
+    interval_score[above] += (2.0 / alpha) * (
+        valid_actual[above] - valid_upper[above]
+    )
+    coverage = float(covered.mean())
     return {
         "n_intervals": int(valid.sum()),
-        "interval_coverage": float(
-            np.mean((actual[valid] >= lower[valid]) & (actual[valid] <= upper[valid]))
-        ),
-        "mean_interval_width_mg_dl": float(np.mean(upper[valid] - lower[valid])),
+        "nominal_coverage": float(nominal_coverage),
+        "interval_coverage": coverage,
+        "coverage_error": float(coverage - nominal_coverage),
+        "mean_interval_width_mg_dl": float(width.mean()),
+        "median_interval_width_mg_dl": float(np.median(width)),
+        "mean_interval_score_mg_dl": float(interval_score.mean()),
     }
 
 
@@ -278,13 +314,17 @@ def binary_event_metrics(
     *,
     target_column: str,
     probability_column: str,
-) -> dict[str, float | int]:
+    minimum_positive_events: int = 10,
+    minimum_negative_events: int = 10,
+) -> dict[str, float | int | bool]:
     """Evaluate a learned event probability; rank metrics need both classes."""
 
     required = {target_column, probability_column}
     missing = required - set(frame.columns)
     if missing:
         raise KeyError(f"Event frame is missing columns: {sorted(missing)}")
+    if minimum_positive_events <= 0 or minimum_negative_events <= 0:
+        raise ValueError("Minimum event-support counts must be positive.")
     target = frame[target_column].to_numpy(dtype=float)
     probability = frame[probability_column].to_numpy(dtype=float)
     valid = np.isfinite(target) & np.isfinite(probability)
@@ -296,10 +336,22 @@ def binary_event_metrics(
         raise ValueError("Event targets must be binary.")
     if np.any((p < 0) | (p > 1)):
         raise ValueError("Event probabilities must be in [0, 1].")
+    positive_events = int(y.sum())
+    negative_events = int(len(y) - positive_events)
+    minimum_support_met = bool(
+        positive_events >= minimum_positive_events
+        and negative_events >= minimum_negative_events
+    )
     result: dict[str, float | int] = {
         "n_event_predictions": int(valid.sum()),
+        "positive_events": positive_events,
+        "negative_events": negative_events,
         "event_prevalence": float(y.mean()),
         "brier_score": float(brier_score_loss(y.astype(int), p)),
+        "rank_metrics_estimable": bool(np.unique(y).size == 2),
+        "minimum_support_met": minimum_support_met,
+        "minimum_positive_events": int(minimum_positive_events),
+        "minimum_negative_events": int(minimum_negative_events),
         "auroc": float("nan"),
         "average_precision": float("nan"),
     }

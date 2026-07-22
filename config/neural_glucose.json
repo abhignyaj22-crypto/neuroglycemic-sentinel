@@ -30,7 +30,10 @@
       "eeg_beta_variability",
       "eeg_gamma_variability",
       "eeg_theta_alpha_ratio",
-      "eeg_beta_alpha_ratio"
+      "eeg_beta_alpha_ratio",
+      "eeg_source_count",
+      "eeg_alpha_between_source_std",
+      "eeg_beta_between_source_std"
     ],
     "wearable": [
       "wearable_ihealth_heart_rate_mean_bpm",

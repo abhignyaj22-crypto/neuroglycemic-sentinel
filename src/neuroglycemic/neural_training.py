@@ -228,6 +228,7 @@ LossStep: TypeAlias = Callable[[nn.Module, Batch], LossOutput]
 @dataclass(frozen=True)
 class NeuralTrainingResult:
     best_epoch: int
+    initial_validation_loss: float
     best_validation_loss: float
     epochs_completed: int
     stopped_early: bool
@@ -739,15 +740,23 @@ def train_with_early_stopping(
         weight_decay=config.weight_decay,
     )
     destination = checkpoint_path or config.checkpoint_path
-    best_loss = float("inf")
-    best_epoch = 0
-    epochs_without_improvement = 0
-    history: list[dict[str, float | int]] = []
-
     train_batch_values = list(train_batches)
     validation_batch_values = list(validation_batches)
     if not train_batch_values or not validation_batch_values:
         raise ValueError("Training and validation batches must not be empty.")
+    initial_validation = _run_epoch(
+        model,
+        validation_batch_values,
+        loss_step,
+        device=device,
+        optimizer=None,
+        gradient_clip_norm=config.gradient_clip_norm,
+    )["loss"]
+    best_loss = initial_validation
+    best_epoch = 0
+    epochs_without_improvement = 0
+    history: list[dict[str, float | int]] = []
+
     for epoch in range(1, config.epochs + 1):
         epoch_batches = list(train_batch_values)
         random.Random(config.seed + epoch).shuffle(epoch_batches)
@@ -794,7 +803,10 @@ def train_with_early_stopping(
                 break
 
     if best_epoch == 0 or not destination.exists():
-        raise RuntimeError("Training ended without a finite validation checkpoint.")
+        raise RuntimeError(
+            "Training did not improve on the untrained epoch-zero validation "
+            "baseline; no checkpoint was accepted."
+        )
     load_neural_checkpoint(
         destination,
         model,
@@ -804,6 +816,7 @@ def train_with_early_stopping(
     )
     return NeuralTrainingResult(
         best_epoch=best_epoch,
+        initial_validation_loss=initial_validation,
         best_validation_loss=best_loss,
         epochs_completed=len(history),
         stopped_early=len(history) < config.epochs,

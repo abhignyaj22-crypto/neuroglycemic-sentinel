@@ -51,7 +51,15 @@ def _read_table(path: Path) -> pd.DataFrame:
     if suffix in {".parquet", ".pq"}:
         return pd.read_parquet(path)
     if suffix in {".csv", ".gz"}:
-        return pd.read_csv(path)
+        header = pd.read_csv(path, nrows=0)
+        identity_columns = {
+            name: "string"
+            for name in header.columns
+            if name in {"patient_id", "cohort_id", "participant_key", "session_id"}
+            or name.endswith("_patient_id")
+            or name.endswith("_cohort_id")
+        }
+        return pd.read_csv(path, dtype=identity_columns)
     raise ValueError("Aligned neural data must be CSV, CSV.GZ, or Parquet.")
 
 
@@ -213,7 +221,9 @@ def load_aligned_window_frame(
         frame[name] = frame[name].astype("string")
         if frame[name].isna().any() or frame[name].str.strip().eq("").any():
             raise ValueError(f"{name} must be populated on every row.")
-    frame["anchor_time"] = pd.to_datetime(frame["anchor_time"], utc=True, errors="coerce")
+    frame["anchor_time"] = pd.to_datetime(
+        frame["anchor_time"], utc=True, errors="coerce", format="mixed"
+    )
     if frame["anchor_time"].isna().any():
         raise ValueError("anchor_time contains invalid timestamps.")
     if frame.duplicated(["cohort_id", "patient_id", "anchor_time"]).any():
@@ -257,7 +267,10 @@ def load_aligned_window_frame(
         patient = frame[f"{modality}_patient_id"].astype("string")
         cohort = frame[f"{modality}_cohort_id"].astype("string")
         anchor = pd.to_datetime(
-            frame[f"{modality}_anchor_time"], utc=True, errors="coerce"
+            frame[f"{modality}_anchor_time"],
+            utc=True,
+            errors="coerce",
+            format="mixed",
         )
         mismatch = available & (
             patient.ne(frame["patient_id"]).fillna(True)
@@ -272,7 +285,7 @@ def load_aligned_window_frame(
             )
         available_time_name = f"{modality}_available_time"
         available_time = pd.to_datetime(
-            frame[available_time_name], utc=True, errors="coerce"
+            frame[available_time_name], utc=True, errors="coerce", format="mixed"
         )
         future_information = available & (
             available_time.isna() | available_time.gt(frame["anchor_time"])
@@ -298,7 +311,9 @@ def load_aligned_window_frame(
         value_name = target_column(horizon)
         time_name = target_time_column(horizon)
         values = pd.to_numeric(frame[value_name], errors="coerce")
-        times = pd.to_datetime(frame[time_name], utc=True, errors="coerce")
+        times = pd.to_datetime(
+            frame[time_name], utc=True, errors="coerce", format="mixed"
+        )
         valid = values.notna()
         if valid.sum() < 2:
             raise ValueError(f"{value_name} needs at least two observed labels.")
@@ -541,7 +556,11 @@ def make_neural_batches(
     persistence_name = next(
         (
             name
-            for name in ("cgm_current_mg_dl", "ehr_current_glucose_mg_dl")
+            for name in (
+                "reference_current_glucose_mg_dl",
+                "cgm_current_mg_dl",
+                "ehr_current_glucose_mg_dl",
+            )
             if name in ordered
         ),
         None,
@@ -978,8 +997,20 @@ def glucose_forecast_metrics(predictions: pd.DataFrame) -> dict[str, Any]:
                 targets, expert_means, expert_scales, weights
             ),
             "prediction_interval_95_coverage": intervals["interval_coverage"],
+            "prediction_interval_95_nominal_coverage": intervals[
+                "nominal_coverage"
+            ],
+            "prediction_interval_95_coverage_error": intervals[
+                "coverage_error"
+            ],
             "mean_prediction_interval_95_width_mg_dl": intervals[
                 "mean_interval_width_mg_dl"
+            ],
+            "median_prediction_interval_95_width_mg_dl": intervals[
+                "median_interval_width_mg_dl"
+            ],
+            "mean_prediction_interval_95_score_mg_dl": intervals[
+                "mean_interval_score_mg_dl"
             ],
             "hypoglycemia_event": hypoglycemia,
             "hyperglycemia_event": hyperglycemia,

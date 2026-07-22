@@ -5,7 +5,7 @@ import pytest
 import torch
 from torch import nn
 
-from src.neuroglycemic.training import (
+from src.neuroglycemic.neural_training import (
     GlucoseTargetStandardizer,
     LossOutput,
     inverse_transform_neuroglycemic_outputs,
@@ -18,6 +18,22 @@ from src.neuroglycemic.neural_model import NeuroGlycemicNet
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.parametrize(
+    "name",
+    (
+        "neural_glucose.json",
+        "neural_glucose_physio.json",
+        "big_ideas_neural.json",
+        "diatrend_glucose.json",
+        "mimic_neural_glucose.json",
+    ),
+)
+def test_every_shipped_neural_config_loads(name: str) -> None:
+    config = load_neural_training_config(ROOT / "config" / name)
+    assert config.feature_registry
+    assert config.forecast_horizons_minutes
 
 
 class TinyRegressor(nn.Module):
