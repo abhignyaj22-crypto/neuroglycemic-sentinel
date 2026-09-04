@@ -249,10 +249,34 @@ def check_glucose_ladder_and_warnings() -> list[dict]:
     else:
         out.append(_fail("deep_tabular_result.csv", "missing"))
 
-    if summary.is_file():
+    regen = ROOT / "outputs" / "scoreboards" / "regenerated" / "glycemic_warning.csv"
+    if regen.is_file():
+        # Real recomputed AUROC (scripts/build_glycemic_warning_table.py), replaces the
+        # substring check below with a structured comparison. Tolerance is generous
+        # (independent retraining, not a byte-replay of the committed numbers).
+        rrows = {r["endpoint"]: r for r in _read_csv(regen)}
+        expect = {"hypoglycemia_warning": 0.976, "hyperglycemia_warning": 0.981}
+        for name, want in expect.items():
+            r = rrows.get(name)
+            if not r or r.get("status") != "ok":
+                out.append(_fail(f"Hypo/hyper warning AUROC {want} ({name})",
+                                 f"regenerated row missing/not-ok: {r}"))
+                continue
+            got = float(r["auroc"])
+            if _near(got, want, 0.05):
+                out.append(_ok(f"Hypo/hyper warning AUROC {want} ({name}), reproduced",
+                               f"auroc={got:.3f} n_test={r.get('n_test')}"))
+            else:
+                out.append(_fail(f"Hypo/hyper warning AUROC {want} ({name}), reproduced",
+                                 f"auroc={got:.3f} outside tolerance of {want}"))
+    elif summary.is_file():
+        # Fallback: the committed-artifact substring check, used only when the real
+        # reproduction hasn't been run yet (`python3 scripts/build_glycemic_warning_table.py`).
         text = summary.read_text()
         if "0.976" in text and "0.981" in text:
-            out.append(_ok("Hypo/hyper warning AUROC 0.976/0.981", "present in best_models_summary.csv"))
+            out.append(_ok("Hypo/hyper warning AUROC 0.976/0.981 (artifact-only, not reproduced)",
+                           "present in best_models_summary.csv — run "
+                           "scripts/build_glycemic_warning_table.py for a real reproduction check"))
         else:
             out.append(_fail("Hypo/hyper warning AUROC 0.976/0.981", "not found in summary"))
     else:

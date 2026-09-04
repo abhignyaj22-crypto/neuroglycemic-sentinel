@@ -1,0 +1,4 @@
+arm,horizon_minutes,rmse_mg_dl,mae_mg_dl,n_train,n_test
+full,30,17.301,11.206,11308,4716
+no_meal,30,17.158,11.181,11308,4716
+no_cgm_history,30,28.999,20.77,11308,4716

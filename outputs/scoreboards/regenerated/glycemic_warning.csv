@@ -1,0 +1,3 @@
+endpoint,horizon_minutes,metric,status,auroc,n_train,n_test,positive_rate_test
+hypoglycemia_warning,30,auroc,ok,0.965,1858,600,0.293
+hyperglycemia_warning,30,auroc,ok,1.0,1858,600,0.012

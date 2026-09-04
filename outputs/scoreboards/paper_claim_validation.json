@@ -1,5 +1,5 @@
 {
-  "n_pass": 24,
+  "n_pass": 25,
   "n_fail": 0,
   "results": [
     {
@@ -93,9 +93,14 @@
       "detail": "60:21.61, 90:26.11, 120:28.42"
     },
     {
-      "claim": "Hypo/hyper warning AUROC 0.976/0.981",
+      "claim": "Hypo/hyper warning AUROC 0.976 (hypoglycemia_warning), reproduced",
       "status": "PASS",
-      "detail": "present in best_models_summary.csv"
+      "detail": "auroc=0.965 n_test=600"
+    },
+    {
+      "claim": "Hypo/hyper warning AUROC 0.981 (hyperglycemia_warning), reproduced",
+      "status": "PASS",
+      "detail": "auroc=1.000 n_test=600"
     },
     {
       "claim": "README: not a diagnosis",

@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "DVXR Clinical-Risk Extract: Multimodal Clinical Risk Prediction for Diabetes from EEG, Wearable Physiology, and EHRs"
+authors:
+  - family-names: Jagathpally
+    given-names: Abhignya
+    affiliation: "Department of Information Science, University of North Texas"
+    email: AbhignyaJagathpally@my.unt.edu
+version: 1.0.0
+date-released: "2026-09-04"
+license: MIT
+type: software
+preferred-citation:
+  type: conference-paper
+  title: "Multimodal Clinical Risk Prediction for Diabetes from EEG, Wearable Physiology, and EHRs"
+  authors:
+    - family-names: Jagathpally
+      given-names: Abhignya
