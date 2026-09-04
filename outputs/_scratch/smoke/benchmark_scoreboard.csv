@@ -1,2 +1,0 @@
-task,metric,best_baseline,base_err,prop_err,delta_abs,RER_pct,RER_CI_low,RER_CI_high,p_wilcoxon,p_holm,cliffs_delta,n_folds,meets_>=50%
-wesad_stress,1-AUROC,rep:raw,0.094,0.187,-0.093,-98.95,-148.63,-78.22,1.0,,-1.0,2,False
