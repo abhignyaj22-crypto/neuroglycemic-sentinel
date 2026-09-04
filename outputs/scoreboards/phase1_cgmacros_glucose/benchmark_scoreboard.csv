@@ -1,0 +1,2 @@
+task,metric,best_baseline,base_err,prop_err,delta_abs,RER_pct,RER_CI_low,RER_CI_high,p_wilcoxon,p_holm,cliffs_delta,n_folds,meets_>=50%
+cgmacros_glucose,MAE,ridge_raw_sequence,10.817,11.6784,-0.8614,-7.96,-8.93,-6.86,1.0,1.0,-0.552,25,False

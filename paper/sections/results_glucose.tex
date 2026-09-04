@@ -1,0 +1,17 @@
+\subsection{Fusion Helps Only under Same-Subject Complementary Signals}
+\label{sec:glucose}
+
+The only complementary-signal win is meal events added to CGM history on the same CGMacros
+subjects (Table~\ref{tab:glucose}, Fig.~\ref{fig:glucose}). At 30 minutes, persistence RMSE is
+$17.40$\,mg/dL and gradient boosting is $12.48$. NeuroGlycemicNet is $12.99$. On this committed
+ladder, GBM wins point RMSE at every horizon. A separate file
+(\texttt{outputs/\_r2/deep\_tabular\_result.csv}) reports a redesigned deep net with later-horizon
+edges; those cells are not Table~\ref{tab:glucose} and are not drawn in Fig.~\ref{fig:glucose}.
+
+Leave-one-modality-out under the same patient-held-out split
+(Table~\ref{tab:glucose\_ablation}, Fig.~\ref{fig:glucose-ablation}) isolates the second modality.
+CGM plus meals is RMSE $12.99$; CGM only is $13.33$ ($+0.34$\,mg/dL when meals are removed).
+That $-0.34$\,mg/dL is the only integrated win in the study. Without CGM, RMSE rises to $34.09$
+and the model abstains on about $49.7\%$ of windows. Wearable-only forecasts that lack CGM-in
+lose to persistence~\cite{lu2026glucofmbench}. Instability detection AUROC $0.976$ (hypoglycemia)
+and $0.981$ (hyperglycemia) at 30 minutes is supporting evidence, not a second thesis.

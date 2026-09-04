@@ -1,0 +1,19 @@
+\begin{table*}[t]
+\centering
+\footnotesize
+\caption{POW Goal 3 ablation: best single modality vs the integrated multimodal fusion, under repeated subject/patient-held-out grouped CV (Holm-corrected). Integrated fusion wins only on glucose forecasting; single-modality wins or ties on every mental-health task.}
+\label{tab:comparative}
+\begin{tabular}{llrrrl}
+\toprule
+Task & Metric & Best single modality & Integrated fusion & Delta & Verdict \\
+\midrule
+Stress (PhysioNet) & AUROC & 0.892 & 0.871 & -0.021 & single-modality wins \\
+Stress (WESAD) & AUROC & 0.955 & 0.871 & -0.084 & single-modality wins \\
+Anxiety (DEAP) & AUROC & 0.534 & 0.531 & -0.003 & approx. tie \\
+Arousal (DEAP) & AUROC & 0.548 & 0.542 & -0.006 & single-modality wins \\
+Cognitive workload (EEGMAT) & AUROC & 0.740 & 0.635 & -0.105 & single-modality wins \\
+Depression (Mumtaz) & AUROC & 0.918 & 0.795 & -0.123 & single-modality wins \\
+Glucose forecast (CGMacros) & RMSE@30 (mg/dL, lower better) & 13.330 & 12.990 & -0.340 & integrated wins \\
+\bottomrule
+\end{tabular}
+\end{table*}

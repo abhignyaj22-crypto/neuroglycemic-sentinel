@@ -1,0 +1,60 @@
+{
+  "lab_root": null,
+  "device": "cpu",
+  "seed": 7,
+  "fm_probes": false,
+  "default_profile": "paper-validate",
+  "profiles": {
+    "smoke": {
+      "tasks": ["wesad_stress"],
+      "repeats": 1,
+      "folds": 2,
+      "no_sota": true,
+      "reps": ["raw", "fused"]
+    },
+    "mh": {
+      "tasks": [
+        "wesad_stress",
+        "deap_anxiety",
+        "deap_arousal",
+        "eegmat_workload",
+        "mumtaz_depression"
+      ],
+      "repeats": 5,
+      "folds": 5,
+      "no_sota": false,
+      "reps": ["raw", "pca", "neural", "vq", "fused"]
+    },
+    "glucose": {
+      "tasks": ["cgmacros_glucose"],
+      "repeats": 5,
+      "folds": 5,
+      "no_sota": false,
+      "reps": ["raw", "pca", "neural", "vq", "fused"]
+    },
+    "pow": {
+      "tasks": [
+        "wesad_stress",
+        "deap_anxiety",
+        "deap_arousal",
+        "eegmat_workload",
+        "mumtaz_depression",
+        "cgmacros_glucose"
+      ],
+      "repeats": 0,
+      "folds": 0,
+      "no_sota": true,
+      "reps": []
+    }
+  },
+  "endpoints": {
+    "stress_detection": "wesad_stress",
+    "anxiety_prediction": "deap_anxiety",
+    "depression_risk": "mumtaz_depression",
+    "cognitive_overload": "eegmat_workload",
+    "glucose_forecast": "cgmacros_glucose",
+    "diabetes_complication": "blocked",
+    "diabetes_progression": "blocked"
+  },
+  "_comment": "Copy to config.json. Prefer export DVXR_LAB_ROOT=/path/to/pipelinedvxr for retrain profiles. paper-validate and layer-tour need no lab."
+}

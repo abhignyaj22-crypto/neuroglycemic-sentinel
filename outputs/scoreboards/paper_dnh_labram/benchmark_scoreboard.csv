@@ -1,0 +1,3 @@
+task,metric,best_baseline,base_err,prop_err,delta_abs,RER_pct,RER_CI_low,RER_CI_high,p_wilcoxon,p_holm,cliffs_delta,n_folds,meets_>=50%
+mumtaz_depression,1-AUROC,labram,0.0392,0.2134,-0.1742,-444.51,-682.59,-310.66,1.0,1.0,-0.893,15,False
+eegmat_workload,1-AUROC,single:physiology,0.2565,0.3543,-0.0978,-38.13,-58.3,-21.01,0.99994,1.0,-0.6,15,False

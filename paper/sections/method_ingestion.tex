@@ -1,0 +1,23 @@
+\subsection{Co-occurrence Constraint and Canonical Schema}
+\label{subsec:ingestion}
+
+Genuine learned fusion is valid only where modalities co-occur on the same subject at the same
+time. In the open data used here that holds for wearable physiology with CGM and meal context
+(CGMacros), EEG with peripheral physiology (DEAP), and chest/wrist physiology (WESAD). No open
+cohort co-registers EEG, CGM, and EHR on one subject. The serving router therefore refuses
+unmatched clamp-EEG concatenated onto CGMacros people; that join is not a parent-DVXR Goal~3
+object.
+
+Every source maps onto one long-format event table before any encoder runs. The required floor is
+thirteen columns (\texttt{subject\_id}, \texttt{session\_id}, \texttt{timestamp\_utc},
+\texttt{source\_system}, \texttt{device}, \texttt{modality}, \texttt{channel}, \texttt{value},
+\texttt{unit}, \texttt{sampling\_rate\_hz}, \texttt{quality\_flag}, \texttt{label\_name},
+\texttt{label\_value}); dataset-specific extras are preserved after that floor. Windowing is
+strictly no-future-leakage: features at prediction time $t$ use history $\le t$, and the target
+is held out of the feature set. Splits are patient-disjoint, so temporal causality is paired with
+the absence of subject leakage. This is a no-future-information property, not an interventional
+causal-effect claim.
+
+Galea and EMOTIV sessions ingested on 2026-06-08 validate the schema and plug-and-play path only:
+they are single-subject, unused as training or validation labels, and contribute no reported
+metric.

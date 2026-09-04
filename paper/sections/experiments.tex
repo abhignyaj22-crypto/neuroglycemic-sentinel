@@ -1,0 +1,57 @@
+\section{Experiments}
+\label{sec:experiments}
+
+Every number in Results is produced under one contract: the scoring model has not seen its test
+subject. Execution is offline, CPU-default, and deterministic (\texttt{seed=7} through folds,
+initialization, and bootstrap resamples).
+
+\subsection{Cohorts and Tasks}
+\label{sec:cohorts}
+
+Mental-health and BCI tasks use Mumtaz 2016 resting EEG for MDD versus control ($n=58$)
+\cite{mumtaz2016}; WESAD chest/wrist physiology for stress ($n=8$) \cite{wesad}; PhysioNet
+EEGMAT rest-versus-arithmetic with 19-channel EEG plus ECG at 64\,Hz ($n=20$) \cite{eegmat};
+PhysioNet Non-EEG wearable stress \cite{noneeg}; and DEAP EEG plus peripheral physiology against
+self-assessment-manikin anxiety and arousal labels \cite{deap}. DEAP is a documented
+cross-subject chance ceiling, not a product screen. Metabolic forecasting uses CGMacros under
+patient-disjoint splits at 30--120\,min horizons \cite{cgmacros}. MTSamples notes are scored as
+a standalone language capability and are not fused. MIMIC-IV demo mortality (15 events in 252
+encounters) is honesty-excluded as a validated claim \cite{mimic}. No cohort co-registers EEG,
+CGM, and EHR on one subject.
+
+\subsection{Subject-Held-Out Protocol}
+\label{sec:cv}
+
+The fusion scoreboard uses repeated grouped cross-validation, \texttt{repeats=5}$\times$\texttt{folds=5}
+(25 folds), \texttt{seed=7}. Specialist headline tables may use $3\times5$ (15 folds) where the
+committed screener manifest says so (for example
+\texttt{outputs/product/screeners/mumtaz\_depression/manifest.json}); those protocols are not
+blended into one number. The grouping key is the subject identifier, so every window from a person
+stays on one side of each split.
+
+Window-level AUROC pools held-out windows; subject-level AUROC aggregates each held-out person
+to one score. On Mumtaz, a dedicated identity audit
+(\texttt{outputs/\_r2/depression\_identity\_audit.md}) decodes subject identity at accuracy
+$0.888$ against a $1/58$ chance rate, and each subject carries exactly one diagnosis. Under that
+confound the depression AUROC cannot be read as a transferable biomarker. Opponent selection
+shares the reported folds (single-level, not nested CV); the resulting optimism is stated, not
+hidden.
+
+\subsection{Metrics, Calibration, Utility, and Tests}
+\label{sec:stats}
+
+Classification uses AUROC and error $1-\mathrm{AUROC}$. Relative error reduction is
+$\mathrm{RER}=(\mathrm{base\_err}-\mathrm{prop\_err})/\mathrm{base\_err}$ against the strongest
+non-fused opponent on the same folds. A $\ge 50\%$ RER bar was pre-registered; it is a hurdle,
+not an expectation. Glucose uses RMSE and MAE in mg/dL against persistence, plus
+leave-one-modality-out ablations. Classification probabilities are Platt- or temperature-scaled
+and scored by expected calibration error on out-of-fold scores. Glucose uncertainty is
+split-conformal PI-95 coverage. Decision-curve net benefit~\cite{vickers2006dca} at threshold
+$p_t$ is
+\begin{equation}
+\mathrm{NB}(p_t) = \frac{\mathrm{TP}}{n} - \frac{\mathrm{FP}}{n}\,\frac{p_t}{1-p_t}.
+\end{equation}
+A screen is credited as useful at $p_t$ only when a one-sided 95\% bootstrap lower bound on
+$\mathrm{NB}(p_t)$ exceeds the better of treat-all and treat-none (Table~\ref{tab:utility}).
+Head-to-head tests are paired one-sided Wilcoxon signed-rank tests on shared folds, Holm-corrected
+across tasks, with 95\% bootstrap confidence intervals on RER and Cliff's $\delta$.

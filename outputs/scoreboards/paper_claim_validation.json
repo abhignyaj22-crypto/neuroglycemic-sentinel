@@ -1,0 +1,126 @@
+{
+  "n_pass": 24,
+  "n_fail": 0,
+  "results": [
+    {
+      "claim": "CACMFConfig defaults",
+      "status": "PASS",
+      "detail": "d=64 d_f=128 K=512 seed=7"
+    },
+    {
+      "claim": "WESAD specialist AUROC 0.955; fusion RER negative",
+      "status": "PASS",
+      "detail": "AUROC=0.9547 RER=-186.05%"
+    },
+    {
+      "claim": "MH fusion loses (stress)",
+      "status": "PASS",
+      "detail": "RER=-19.86% Holm_p=1.0"
+    },
+    {
+      "claim": "MH fusion loses (wesad_stress)",
+      "status": "PASS",
+      "detail": "RER=-186.05% Holm_p=1.0"
+    },
+    {
+      "claim": "MH fusion loses (deap_anxiety)",
+      "status": "PASS",
+      "detail": "RER=-0.81% Holm_p=1.0"
+    },
+    {
+      "claim": "MH fusion loses (deap_arousal)",
+      "status": "PASS",
+      "detail": "RER=-1.19% Holm_p=1.0"
+    },
+    {
+      "claim": "MH fusion loses (eegmat_workload)",
+      "status": "PASS",
+      "detail": "RER=-40.25% Holm_p=1.0"
+    },
+    {
+      "claim": "MH fusion loses (mumtaz_depression)",
+      "status": "PASS",
+      "detail": "RER=-400.2% Holm_p=1.0"
+    },
+    {
+      "claim": "EEGMAT specialist AUROC ~0.740",
+      "status": "PASS",
+      "detail": "AUROC=0.7402"
+    },
+    {
+      "claim": "ridge_raw_sequence MAE 10.817 beats fused",
+      "status": "PASS",
+      "detail": "base=10.8170 fused=11.6784 RER=-7.96%"
+    },
+    {
+      "claim": "Meal ablation 13.33\u219212.99",
+      "status": "PASS",
+      "detail": "without_events=13.326 observed=12.987"
+    },
+    {
+      "claim": "Removing CGM collapses forecast",
+      "status": "PASS",
+      "detail": "without_cgm RMSE=34.09"
+    },
+    {
+      "claim": "WESAD strategy ranking (AUROC primary)",
+      "status": "PASS",
+      "detail": "best=late_weighted AUROC=0.9244; F1@0.5=0 (majority-threshold caveat documented)"
+    },
+    {
+      "claim": "PhysioNet stress AUROC 0.892",
+      "status": "PASS",
+      "detail": "single=0.892"
+    },
+    {
+      "claim": "Comparative WESAD 0.955",
+      "status": "PASS",
+      "detail": "single=0.955"
+    },
+    {
+      "claim": "Comparative board present",
+      "status": "PASS",
+      "detail": "rows=7"
+    },
+    {
+      "claim": "GBM 30-min RMSE 12.48",
+      "status": "PASS",
+      "detail": "rmse=12.481"
+    },
+    {
+      "claim": "Temporal/deep lowest at 60/90/120",
+      "status": "PASS",
+      "detail": "60:21.61, 90:26.11, 120:28.42"
+    },
+    {
+      "claim": "Hypo/hyper warning AUROC 0.976/0.981",
+      "status": "PASS",
+      "detail": "present in best_models_summary.csv"
+    },
+    {
+      "claim": "README: not a diagnosis",
+      "status": "PASS",
+      "detail": "found"
+    },
+    {
+      "claim": "README mentions fusion as comparator/loss",
+      "status": "PASS",
+      "detail": "found"
+    },
+    {
+      "claim": "README/endpoints block complication/progression",
+      "status": "PASS",
+      "detail": "found"
+    },
+    {
+      "claim": "endpoint blocked: diabetes_complication",
+      "status": "PASS",
+      "detail": "No dated complication labels; blocked."
+    },
+    {
+      "claim": "endpoint blocked: diabetes_progression",
+      "status": "PASS",
+      "detail": "No incident-progression timestamps; blocked."
+    }
+  ]
+}

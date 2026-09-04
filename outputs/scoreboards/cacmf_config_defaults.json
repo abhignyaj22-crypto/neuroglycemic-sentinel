@@ -1,0 +1,29 @@
+{
+  "d": 64,
+  "d_f": 128,
+  "codebook_size": 512,
+  "commitment_beta": 0.25,
+  "n_fusion_layers": 4,
+  "n_heads": 8,
+  "dropout": 0.1,
+  "fusion_strategy": "cross_modal",
+  "epochs": 30,
+  "batch_size": 64,
+  "lr_encoder": 0.001,
+  "lr_fusion": 0.0005,
+  "weight_decay": 0.01,
+  "grad_clip": 1.0,
+  "lambda_task": 1.0,
+  "lambda_vq": 1.0,
+  "lambda_recon": 0.5,
+  "lambda_align": 0.1,
+  "seed": 7,
+  "fusion_strategies": [
+    "early",
+    "intermediate",
+    "late_weighted",
+    "attention",
+    "cross_modal"
+  ],
+  "source": "dvxr.config.CACMFConfig / DEFAULTS"
+}

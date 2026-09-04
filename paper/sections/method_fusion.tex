@@ -1,0 +1,24 @@
+\subsection{Fusion Operators under Test}
+\label{subsec:fusion}
+
+Three predictors are compared on the same subject-held-out folds: the strongest non-fused
+specialist, learned context-aware cross-modal fusion (CACMF), and reliability-gated do-no-harm
+(DNH) late fusion. Figure~\ref{fig:architecture} is the serving path for those objects.
+
+CACMF builds one vector-quantization codebook per supplied modality and combines the quantized
+latents with a selectable operator (early concatenation, intermediate projection, late-weighted
+heads, attention pooling, or a masked cross-modal transformer~\cite{medfuse,medpatch}). The
+scientific object is the fused representation versus the strongest non-fused opponent, not a
+five-strategy bake-off. A missing modality is assigned a learned absent token and masked out of
+the gate; it is not zero-imputed. When no modality clears quality and freshness gates, fusion
+abstains.
+
+DNH (\texttt{dnh\_gated} in \texttt{src/dvxr/bench/gated\_fusion.py}) does not jointly train a
+mixer. An inner subject-grouped cross-validation scores a candidate library of single-modality
+heads, linear concatenation, a gradient-boosted concatenation, and, when available, a frozen
+foundation-model probe. Non-negative Super-Learner-style weights~\cite{vanderlaan2007superlearner}
+are shrunk toward the best candidate by an amount tied to inner-CV noise. A blend is admitted
+only if its inner-CV advantage clears one subject-grouped bootstrap standard error; otherwise
+the method falls back to the best candidate. The contribution is the finite-sample
+characterization at $N\le 60$, not a new oracle inequality. The floor is an inner-CV guarantee;
+whether it holds on held-out subjects is an empirical question for Results.

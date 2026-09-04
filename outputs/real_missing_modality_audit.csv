@@ -1,3 +1,0 @@
-patient_id,condition,reason,eeg_available,wearable_available,windows_kept
-cogwear_03,baseline,real incomplete session; inference only,0.0,1.0,2
-cogwear_03,cognitive_load,no complete modality bundle,,,0

@@ -1,0 +1,8 @@
+task,metric,best_single_modality,integrated_fusion,delta,verdict,holm_p
+Stress (PhysioNet),AUROC,0.892,0.871,-0.021,single-modality wins,1.0
+Stress (WESAD),AUROC,0.955,0.871,-0.084,single-modality wins,1.0
+Anxiety (DEAP),AUROC,0.534,0.531,-0.003,~tie,1.0
+Arousal (DEAP),AUROC,0.548,0.542,-0.006,single-modality wins,1.0
+Cognitive workload (EEGMAT),AUROC,0.74,0.635,-0.105,single-modality wins,1.0
+Depression (Mumtaz),AUROC,0.918,0.795,-0.123,single-modality wins,1.0
+Glucose forecast (CGMacros),"RMSE@30 (mg/dL, ↓)",13.33,12.99,-0.34,integrated wins,

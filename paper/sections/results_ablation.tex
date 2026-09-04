@@ -1,0 +1,36 @@
+\subsection{Learned CACMF Fusion Harms or Ties at Chance}
+\label{subsec:ablation}
+
+On the $5\times5$ fusion scoreboard, learned CACMF is outperformed by the strongest non-fused
+opponent on all six mental-health and clinical classification tasks
+(Fig.~\ref{fig:fusion}, Tables~\ref{tab:fusion}--\ref{tab:comparative}). Relative error reduction
+on $1-\mathrm{AUROC}$ is $-19.9\%$ on peripheral stress (95\% CI $-28.6$ to $-13.5$),
+$-185.9\%$ on WESAD ($-441.6$ to $-80.5$), $-0.6\%$ on DEAP anxiety ($-6.4$ to $5.4$),
+$-1.2\%$ on DEAP arousal ($-7.0$ to $4.7$), $-40.4\%$ on EEGMAT ($-56.7$ to $-26.8$), and
+$-148.2\%$ on Mumtaz ($-224.4$ to $-86.7$). Every Holm-adjusted Wilcoxon $p$ is $1.0$; the
+pre-registered $\ge 50\%$ bar is \texttt{False} everywhere.
+
+In native AUROC, the specialist wins or ties every classification row: Non-EEG $0.892$ vs.\ fused
+$0.871$; WESAD $0.955$ vs.\ $0.871$; EEGMAT $0.740$ vs.\ $0.635$; Mumtaz $0.918$ (MOMENT/sota on
+this board; headline LaBraM is the $0.961$ upper bound) vs.\ $0.795$. DEAP is a near-chance tie
+($0.534$ vs.\ $0.531$; $0.548$ vs.\ $0.542$). Where one stream already carries the signal (ECG
+for arithmetic; resting EEG for Mumtaz), joint training adds negative value. Where the signal is
+weak (DEAP), fusion ties at chance.
+
+\subsection{Reliability-Gated Late Fusion as a Do-No-Harm Attempt}
+\label{subsec:dnh}
+
+Among fusion methods, DNH beats CACMF \texttt{rep:fused} on four of six tasks (stress $+10.8\%$,
+WESAD $+28.2\%$, EEGMAT $+17.7\%$, depression $+52.9\%$ RER; $5\times5$, same folds as
+\texttt{BENCHMARK\_FINDINGS.md}). Versus the best single modality it wins three of six (stress
+$+30.9\%$, WESAD $+25.3\%$, depression $+14.0\%$). The held-out floor fails on EEGMAT
+($-15.6\%$) and both DEAP tasks ($-3.6\%$, $-4.5\%$). Inner-CV safety is not a held-out
+guarantee at $N\le 60$: on EEGMAT the inner loop over-trusted a concat/GBM candidate that
+generalized worse than single-ECG.
+
+A 1-SE selection rule (prefer the simplest candidate within one inner-CV SE) closes the EEGMAT
+gap and kills the WESAD win; it is a net negative, so strict argmin stays the default
+(\texttt{outputs/\_dnh\_mh/dnh\_ablation\_1se.md}). Adding LaBraM to the DNH library recruits the
+foundation model on Mumtaz (AUROC $0.910\rightarrow 0.961$) and is not fooled on EEGMAT, where
+ECG remains the ceiling (\texttt{outputs/\_dnh\_labram/benchmark\_scoreboard.csv}). On every
+mental-health task the strongest opponent remains non-fused.

@@ -1,0 +1,31 @@
+cohort,cohort_note,task,config_type,config_name,present_modalities,n_train,n_test,auroc,auprc,f1,accuracy,ece,mae,interval_radius,coverage
+wesad,"WESAD chest+wrist wearable streams, same subject/session",wesad_stress,fusion,early,ecg|eda|emg|motion|ppg|resp|temp,296,96,0.8482539682539683,0.6859304741393275,0.0,0.78125,0.02052972620973985,,,
+wesad,"WESAD chest+wrist wearable streams, same subject/session",wesad_stress,fusion,intermediate,ecg|eda|emg|motion|ppg|resp|temp,296,96,0.8619047619047618,0.6827981345143286,0.0,0.78125,0.059004594106227146,,,
+wesad,"WESAD chest+wrist wearable streams, same subject/session",wesad_stress,fusion,late_weighted,ecg|eda|emg|motion|ppg|resp|temp,296,96,0.9244444444444444,0.7850678370485762,0.0,0.78125,0.13580749214937288,,,
+wesad,"WESAD chest+wrist wearable streams, same subject/session",wesad_stress,fusion,attention,ecg|eda|emg|motion|ppg|resp|temp,296,96,0.7873015873015873,0.5314827100290539,0.0,0.78125,0.08738983795046808,,,
+wesad,"WESAD chest+wrist wearable streams, same subject/session",wesad_stress,fusion,cross_modal,ecg|eda|emg|motion|ppg|resp|temp,296,96,0.5003174603174603,0.481599469108617,0.0,0.78125,0.0009251345569888658,,,
+eegmat,"EEGMAT EEG+ECG, same subject/session",eegmat_workload,fusion,early,eeg|physiology,392,168,0.6454790249433108,0.5930798116453162,0.6775956284153005,0.6488095238095238,0.10619481085311801,,,
+eegmat,"EEGMAT EEG+ECG, same subject/session",eegmat_workload,fusion,intermediate,eeg|physiology,392,168,0.561437074829932,0.6257912088428703,0.5421686746987951,0.5476190476190477,0.03139603173448928,,,
+eegmat,"EEGMAT EEG+ECG, same subject/session",eegmat_workload,fusion,late_weighted,eeg|physiology,392,168,0.5487528344671203,0.5428067908856595,0.6564102564102564,0.6011904761904762,0.11095902944604558,,,
+eegmat,"EEGMAT EEG+ECG, same subject/session",eegmat_workload,fusion,attention,eeg|physiology,392,168,0.6104733560090703,0.5824815690410654,0.6774193548387096,0.6428571428571429,0.059301176064071204,,,
+eegmat,"EEGMAT EEG+ECG, same subject/session",eegmat_workload,fusion,cross_modal,eeg|physiology,392,168,0.5219671201814059,0.5127533567561436,0.6267281105990783,0.5178571428571429,0.014256123453378724,,,
+deap_anxiety,"DEAP EEG+peripheral, high-arousal+low-valence (real SAM)",deap_anxiety,fusion,early,eeg|physiology,1680,560,0.5112281471728476,0.22322191961581395,0.0,0.775,0.07514167517157537,,,
+deap_anxiety,"DEAP EEG+peripheral, high-arousal+low-valence (real SAM)",deap_anxiety,fusion,intermediate,eeg|physiology,1680,560,0.538539609392144,0.23662837825777372,0.0,0.775,0.0659177607723645,,,
+deap_anxiety,"DEAP EEG+peripheral, high-arousal+low-valence (real SAM)",deap_anxiety,fusion,late_weighted,eeg|physiology,1680,560,0.46473374295954945,0.22161637251103483,0.0,0.775,0.07877593820116348,,,
+deap_anxiety,"DEAP EEG+peripheral, high-arousal+low-valence (real SAM)",deap_anxiety,fusion,attention,eeg|physiology,1680,560,0.5318466096115866,0.2689212258897809,0.0,0.775,0.06268487639193022,,,
+deap_anxiety,"DEAP EEG+peripheral, high-arousal+low-valence (real SAM)",deap_anxiety,fusion,cross_modal,eeg|physiology,1680,560,0.4820422792773023,0.22217995671915025,0.0,0.775,0.07576182587072254,,,
+deap_arousal,"DEAP EEG+peripheral, high vs low SAM arousal",deap_arousal,fusion,early,eeg|physiology,1680,560,0.5435685026698852,0.2540173261165859,0.0,0.775,0.06644115157957589,,,
+deap_arousal,"DEAP EEG+peripheral, high vs low SAM arousal",deap_arousal,fusion,intermediate,eeg|physiology,1680,560,0.566994001901836,0.25103432128899045,0.0,0.775,0.05741542404783623,,,
+deap_arousal,"DEAP EEG+peripheral, high vs low SAM arousal",deap_arousal,fusion,late_weighted,eeg|physiology,1680,560,0.5028527540048278,0.23044083562307727,0.0,0.775,0.05202561090035098,,,
+deap_arousal,"DEAP EEG+peripheral, high vs low SAM arousal",deap_arousal,fusion,attention,eeg|physiology,1680,560,0.5506272401433692,0.2861369859819372,0.0,0.775,0.05539694207587414,,,
+deap_arousal,"DEAP EEG+peripheral, high vs low SAM arousal",deap_arousal,fusion,cross_modal,eeg|physiology,1680,560,0.46777850925316367,0.21671875738962332,0.0,0.775,0.06363951215254408,,,
+noneeg,"PhysioNet noneeg peripheral stress, same subject/session",stress,fusion,early,eda|motion|ppg|temp,1079,455,0.7147547652254767,0.7490049175154809,0.570694087403599,0.6329670329670329,0.06499342931495916,,,
+noneeg,"PhysioNet noneeg peripheral stress, same subject/session",stress,fusion,intermediate,eda|motion|ppg|temp,1079,455,0.7537773128777313,0.7655188843458675,0.5714285714285714,0.6703296703296703,0.1159757925913884,,,
+noneeg,"PhysioNet noneeg peripheral stress, same subject/session",stress,fusion,late_weighted,eda|motion|ppg|temp,1079,455,0.8243936928560359,0.8410069032512798,0.7195767195767195,0.7670329670329671,0.1536143237090373,,,
+noneeg,"PhysioNet noneeg peripheral stress, same subject/session",stress,fusion,attention,eda|motion|ppg|temp,1079,455,0.7650317681698435,0.7799751242793089,0.5239616613418531,0.6725274725274726,0.07907171229739766,,,
+noneeg,"PhysioNet noneeg peripheral stress, same subject/session",stress,fusion,cross_modal,eda|motion|ppg|temp,1079,455,0.562315977064931,0.5663005741192665,0.3355263157894737,0.5560439560439561,0.030022935159913805,,,
+cgmacros,CGMacros same-subject CGM + Fitbit HR + meal carbs (causal lookback); not EEG×CGM,cgmacros_glucose_mm,fusion,early,cgm|wearable_phys|behavior,11308,4716,,,,,,20.78070880155426,41.69933319091797,0.9090330788804071
+cgmacros,CGMacros same-subject CGM + Fitbit HR + meal carbs (causal lookback); not EEG×CGM,cgmacros_glucose_mm,fusion,intermediate,cgm|wearable_phys|behavior,11308,4716,,,,,,20.800862368129895,40.09806823730469,0.9045801526717557
+cgmacros,CGMacros same-subject CGM + Fitbit HR + meal carbs (causal lookback); not EEG×CGM,cgmacros_glucose_mm,fusion,late_weighted,cgm|wearable_phys|behavior,11308,4716,,,,,,20.76931128530203,41.6920166015625,0.9105173876166243
+cgmacros,CGMacros same-subject CGM + Fitbit HR + meal carbs (causal lookback); not EEG×CGM,cgmacros_glucose_mm,fusion,attention,cgm|wearable_phys|behavior,11308,4716,,,,,,20.775503527420472,41.67913818359375,0.9098812553011026
+cgmacros,CGMacros same-subject CGM + Fitbit HR + meal carbs (causal lookback); not EEG×CGM,cgmacros_glucose_mm,fusion,cross_modal,cgm|wearable_phys|behavior,11308,4716,,,,,,20.7798785710355,41.7125244140625,0.9098812553011026

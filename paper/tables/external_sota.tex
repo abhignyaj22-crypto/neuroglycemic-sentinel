@@ -1,0 +1,20 @@
+\begin{table*}[t]
+\centering
+\footnotesize
+\caption{DVXR (subject-held-out AUROC) beside published results on the same/comparable cohorts, each labeled with its protocol and DOI. Cross-subject (LOSO / subject-independent) is the honest bar; segment-level numbers carry subject leakage and are shown for context only, never as a head-to-head win across mismatched protocols.}
+\label{tab:sota}
+\begin{tabular}{p{2.4cm}p{2.2cm}p{3.0cm}p{2.2cm}p{2.3cm}p{2.6cm}}
+\toprule
+Cohort & DVXR (AUROC) & Published & Score & Protocol & DOI \\
+\midrule
+mumtaz\_depression & win 0.961 / subj 0.986 & MDD-SSTNet (Sinc-CNN) & 0.651 accuracy & LOSO (cross-subject) & 10.1093/cercor/bhae505 \\
+mumtaz\_depression & win 0.961 / subj 0.986 & GoogleNet CNN & 0.733 accuracy & external-validation & 10.1177/15500594241273181 \\
+mumtaz\_depression & win 0.961 / subj 0.986 & EEGNet & 0.937 accuracy & within-subject/segment & 10.1515/bmt-2021-0232 \\
+wesad\_stress & win 0.955 & GB+ANN ensemble & 0.850 accuracy & LOSO (cross-subject) & 10.1016/j.jbi.2023.104556 \\
+wesad\_stress & win 0.955 & GAF + DNN & 0.948 accuracy & within-subject/segment & 10.3390/bios12121153 \\
+wesad\_stress & win 0.955 & EDA + spectrogram ML & 0.964 accuracy & within-subject/segment & 10.1142/S0129065724500278 \\
+eegmat\_workload & ECG 0.740 / EEG-only LaBraM 0.663 & EMD + SVM (subject-independent) & -- accuracy & subject-independent & 10.1371/journal.pone.0291576 \\
+eegmat\_workload & ECG 0.740 / EEG-only LaBraM 0.663 & R-LMD + BAO + ensemble & 0.974 accuracy & within-subject/segment & 10.1038/s41598-024-84429-6 \\
+\bottomrule
+\end{tabular}
+\end{table*}

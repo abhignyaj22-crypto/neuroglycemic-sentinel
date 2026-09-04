@@ -1,0 +1,7 @@
+task,metric,best_baseline,base_err,prop_err,delta_abs,RER_pct,RER_CI_low,RER_CI_high,p_wilcoxon,p_holm,cliffs_delta,n_folds,meets_>=50%
+stress,1-AUROC,rep:pca,0.1079,0.1294,-0.0214,-19.86,-28.55,-13.51,1.0,1.0,-0.258,25,False
+wesad_stress,1-AUROC,xgboost,0.0453,0.1295,-0.0842,-186.05,-442.68,-80.54,0.99982,1.0,-0.667,25,False
+deap_anxiety,1-AUROC,single:physiology,0.4658,0.4696,-0.0038,-0.81,-6.49,5.12,0.77846,1.0,-0.034,25,False
+deap_arousal,1-AUROC,single:physiology,0.4522,0.4576,-0.0054,-1.19,-7.07,4.63,0.8017,1.0,-0.027,25,False
+eegmat_workload,1-AUROC,single:physiology,0.2598,0.3644,-0.1046,-40.25,-56.57,-26.74,1.0,1.0,-0.69,25,False
+mumtaz_depression,1-AUROC,labram,0.041,0.2052,-0.1642,-400.2,-582.17,-279.22,1.0,1.0,-0.805,25,False
